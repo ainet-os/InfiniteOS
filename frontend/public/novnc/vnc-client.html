@@ -1,0 +1,1269 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>VNC Client</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      background: #000;
+    }
+    #noVNC_canvas {
+      width: 100%;
+      height: 100%;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="noVNC_canvas"></canvas>
+
+  <script>
+    // 从URL参数获取连接信息
+    const urlParams = new URLSearchParams(window.location.search);
+    const wsUrl = urlParams.get('wsUrl');
+    
+    if (!wsUrl) {
+      document.body.innerHTML = '<div style="color: white; text-align: center; padding: 50px;">缺少WebSocket URL参数</div>';
+      throw new Error('缺少WebSocket URL参数');
+    }
+    
+    const canvas = document.getElementById('noVNC_canvas');
+    
+    // 创建CommonJS环境
+    const moduleCache = {};
+    const baseUrl = 'https://cdn.jsdelivr.net/npm/@novnc/novnc@1.6.0/lib/';
+    
+    // EventTargetMixin类 - 必须在require之前定义
+    class EventTargetMixin {
+      constructor() {
+        this._listeners = new Map();
+      }
+      addEventListener(type, callback) {
+        if (!this._listeners.has(type)) {
+          this._listeners.set(type, new Set());
+        }
+        this._listeners.get(type).add(callback);
+      }
+      removeEventListener(type, callback) {
+        if (this._listeners.has(type)) {
+          this._listeners.get(type).delete(callback);
+        }
+      }
+      dispatchEvent(event) {
+        if (!this._listeners.has(event.type)) {
+          return true;
+        }
+        this._listeners.get(event.type).forEach(callback => {
+          callback.call(this, event);
+        });
+        return !event.defaultPrevented;
+      }
+    }
+    
+    // 同步require函数
+    function require(modulePath) {
+      let normalizedPath = modulePath;
+      if (modulePath.startsWith('./')) {
+        normalizedPath = modulePath.slice(2);
+      } else if (modulePath.startsWith('../')) {
+        normalizedPath = modulePath.replace(/\.\.\//g, '');
+      }
+      
+      const fullPath = baseUrl + normalizedPath;
+      
+      // 如果已缓存，直接返回
+      if (moduleCache[fullPath]) {
+        return moduleCache[fullPath].exports;
+      }
+      
+      // 创建新的module
+      const module = { exports: {} };
+      moduleCache[fullPath] = module;
+      
+      // 为依赖模块提供模拟实现
+      if (normalizedPath.includes('util/int.js')) {
+        module.exports = {};
+        return module.exports;
+      }
+      
+      if (normalizedPath.includes('util/logging.js')) {
+        // logging.js导出Debug、Info、Warn、Error等函数
+        // rfb.js使用_interopRequireWildcard，所以需要返回一个包含这些属性的对象
+        const Debug = console.debug.bind(console);
+        const Info = console.info.bind(console);
+        const Warn = console.warn.bind(console);
+        const Error = console.error.bind(console);
+        
+        module.exports = {
+          Debug: Debug,
+          Info: Info,
+          Warn: Warn,
+          Error: Error,
+          debug: Debug,
+          info: Info,
+          warn: Warn,
+          error: Error,
+          initLogging: function(level) {
+            // 可以在这里实现日志级别控制
+          },
+          getLogging: function() {
+            return 'warn';
+          },
+          __esModule: true
+        };
+        return module.exports;
+      }
+      
+      if (normalizedPath.includes('util/strings.js')) {
+        module.exports = {};
+        return module.exports;
+      }
+      
+      if (normalizedPath.includes('util/browser.js')) {
+        // browser.js需要提供更多属性
+        const supportsCursorURIs = 'cursor' in document.documentElement.style;
+        const platform = navigator.platform.toUpperCase();
+        module.exports = {
+          isTouchDevice: 'ontouchstart' in window,
+          isMac: platform.indexOf('MAC') >= 0,
+          isWindows: function() {
+            return platform.indexOf('WIN') >= 0;
+          },
+          isIOS: function() {
+            return /iPad|iPhone|iPod/.test(navigator.userAgent);
+          },
+          supportsCursorURIs: supportsCursorURIs,
+          __esModule: true
+        };
+        return module.exports;
+      }
+      
+      if (normalizedPath.includes('util/element.js')) {
+        module.exports = {};
+        return module.exports;
+      }
+      
+      if (normalizedPath.includes('util/events.js')) {
+        // util/events.js需要导出stopEvent函数
+        module.exports = {
+          stopEvent: function(e) {
+            if (e) {
+              e.stopPropagation();
+              e.preventDefault();
+            }
+          },
+          __esModule: true
+        };
+        return module.exports;
+      }
+      
+      // eventtarget.js - 必须返回一个类
+      if (normalizedPath.includes('util/eventtarget.js')) {
+        // 返回包含default属性的对象，default是EventTargetMixin类
+        module.exports = {
+          default: EventTargetMixin,
+          __esModule: true
+        };
+        return module.exports;
+      }
+      
+      if (normalizedPath.includes('display.js')) {
+        // Display类需要完整的实现
+        class Display {
+          constructor(target) {
+            if (!target) {
+              throw new Error("Target must be set");
+            }
+            if (typeof target === 'string') {
+              throw new Error('target must be a DOM element');
+            }
+            if (!target.getContext) {
+              throw new Error("no getContext method");
+            }
+            
+            this._target = target;
+            this._targetCtx = target.getContext('2d');
+            this._fbWidth = 0;
+            this._fbHeight = 0;
+            this._scale = 1.0;
+            this._clipViewport = false;
+            this._viewportLoc = {
+              x: 0,
+              y: 0,
+              w: target.width || target.clientWidth || 800,
+              h: target.height || target.clientHeight || 600
+            };
+            
+            // 创建隐藏的backbuffer canvas
+            this._backbuffer = document.createElement('canvas');
+            this._drawCtx = this._backbuffer.getContext('2d');
+            this._damageBounds = {
+              left: 0,
+              top: 0,
+              right: 0,
+              bottom: 0
+            };
+            this._renderQ = [];
+            this._flushPromise = null;
+          }
+          
+          get width() {
+            return this._fbWidth;
+          }
+          
+          get height() {
+            return this._fbHeight;
+          }
+          
+          get scale() {
+            return this._scale;
+          }
+          
+          set scale(scale) {
+            this._scale = scale;
+            this._rescale(scale);
+          }
+          
+          get clipViewport() {
+            return this._clipViewport;
+          }
+          
+          set clipViewport(viewport) {
+            this._clipViewport = viewport;
+            const vp = this._viewportLoc;
+            this.viewportChangeSize(vp.w, vp.h);
+            this.viewportChangePos(0, 0);
+          }
+          
+          _rescale(scale) {
+            this._scale = scale;
+            const vp = this._viewportLoc;
+            const width = scale * vp.w + 'px';
+            const height = scale * vp.h + 'px';
+            if (this._target.style.width !== width || this._target.style.height !== height) {
+              this._target.style.width = width;
+              this._target.style.height = height;
+            }
+          }
+          
+          resize(width, height) {
+            this._fbWidth = width;
+            this._fbHeight = height;
+            const canvas = this._backbuffer;
+            if (canvas.width !== width || canvas.height !== height) {
+              const saveImg = (canvas.width > 0 && canvas.height > 0) 
+                ? this._drawCtx.getImageData(0, 0, canvas.width, canvas.height) 
+                : null;
+              if (canvas.width !== width) canvas.width = width;
+              if (canvas.height !== height) canvas.height = height;
+              if (saveImg) {
+                this._drawCtx.putImageData(saveImg, 0, 0);
+              }
+            }
+            const vp = this._viewportLoc;
+            this.viewportChangeSize(vp.w, vp.h);
+            this.viewportChangePos(0, 0);
+          }
+          
+          viewportChangePos(deltaX, deltaY) {
+            const vp = this._viewportLoc;
+            deltaX = Math.floor(deltaX);
+            deltaY = Math.floor(deltaY);
+            if (!this._clipViewport) {
+              deltaX = -vp.w;
+              deltaY = -vp.h;
+            }
+            const vx2 = vp.x + vp.w - 1;
+            const vy2 = vp.y + vp.h - 1;
+            
+            if (deltaX < 0 && vp.x + deltaX < 0) deltaX = -vp.x;
+            if (vx2 + deltaX >= this._fbWidth) deltaX -= vx2 + deltaX - this._fbWidth + 1;
+            if (vp.y + deltaY < 0) deltaY = -vp.y;
+            if (vy2 + deltaY >= this._fbHeight) deltaY -= vy2 + deltaY - this._fbHeight + 1;
+            
+            if (deltaX === 0 && deltaY === 0) return;
+            
+            vp.x += deltaX;
+            vp.y += deltaY;
+            this._damage(vp.x, vp.y, vp.w, vp.h);
+            this.flip();
+          }
+          
+          viewportChangeSize(width, height) {
+            if (!this._clipViewport || typeof width === "undefined" || typeof height === "undefined") {
+              this._viewportLoc.w = this._target.width || this._target.clientWidth || 800;
+              this._viewportLoc.h = this._target.height || this._target.clientHeight || 600;
+            } else {
+              this._viewportLoc.w = width;
+              this._viewportLoc.h = height;
+            }
+          }
+          
+          autoscale(containerWidth, containerHeight) {
+            let scaleRatio;
+            if (containerWidth === 0 || containerHeight === 0) {
+              scaleRatio = 0;
+            } else {
+              const vp = this._viewportLoc;
+              const targetAspectRatio = containerWidth / containerHeight;
+              const fbAspectRatio = vp.w / vp.h;
+              if (fbAspectRatio >= targetAspectRatio) {
+                scaleRatio = containerWidth / vp.w;
+              } else {
+                scaleRatio = containerHeight / vp.h;
+              }
+            }
+            if (scaleRatio > 0) {
+              this._rescale(scaleRatio);
+            }
+          }
+          
+          absX(x) {
+            if (this._scale === 0) {
+              return 0;
+            }
+            return Math.floor(x / this._scale + this._viewportLoc.x);
+          }
+          
+          absY(y) {
+            if (this._scale === 0) {
+              return 0;
+            }
+            return Math.floor(y / this._scale + this._viewportLoc.y);
+          }
+          
+          _damage(x, y, w, h) {
+            if (x < this._damageBounds.left) this._damageBounds.left = x;
+            if (y < this._damageBounds.top) this._damageBounds.top = y;
+            if (x + w > this._damageBounds.right) this._damageBounds.right = x + w;
+            if (y + h > this._damageBounds.bottom) this._damageBounds.bottom = y + h;
+          }
+          
+          flip(fromQueue) {
+            if (this._renderQ.length !== 0 && !fromQueue) {
+              this._renderQPush({ type: 'flip' });
+            } else {
+              const x = this._damageBounds.left;
+              const y = this._damageBounds.top;
+              let w = this._damageBounds.right - x;
+              let h = this._damageBounds.bottom - y;
+              let vx = x - this._viewportLoc.x;
+              let vy = y - this._viewportLoc.y;
+              
+              if (vx < 0) { w += vx; vx = 0; }
+              if (vy < 0) { h += vy; vy = 0; }
+              if (vx + w > this._viewportLoc.w) w = this._viewportLoc.w - vx;
+              if (vy + h > this._viewportLoc.h) h = this._viewportLoc.h - vy;
+              
+              if (w > 0 && h > 0) {
+                this._targetCtx.drawImage(this._backbuffer, x, y, w, h, vx, vy, w, h);
+              }
+              
+              this._damageBounds.left = this._damageBounds.top = 65535;
+              this._damageBounds.right = this._damageBounds.bottom = 0;
+            }
+          }
+          
+          _renderQPush(item) {
+            this._renderQ.push(item);
+          }
+          
+          pending() {
+            return this._renderQ.length > 0;
+          }
+          
+          flush() {
+            if (this._renderQ.length === 0) {
+              return Promise.resolve();
+            } else {
+              if (this._flushPromise === null) {
+                this._flushPromise = new Promise((resolve) => {
+                  this._flushResolve = resolve;
+                });
+              }
+              return this._flushPromise;
+            }
+          }
+          
+          fillRect(x, y, width, height, color, fromQueue) {
+            if (this._renderQ.length !== 0 && !fromQueue) {
+              this._renderQPush({ type: 'fill', x, y, width, height, color });
+            } else {
+              this._setFillColor(color);
+              this._drawCtx.fillRect(x, y, width, height);
+              this._damage(x, y, width, height);
+            }
+          }
+          
+          _setFillColor(color) {
+            const newStyle = 'rgb(' + color[0] + ',' + color[1] + ',' + color[2] + ')';
+            this._drawCtx.fillStyle = newStyle;
+          }
+          
+          copyImage(oldX, oldY, newX, newY, w, h, fromQueue) {
+            if (this._renderQ.length !== 0 && !fromQueue) {
+              this._renderQPush({ type: 'copy', oldX, oldY, x: newX, y: newY, width: w, height: h });
+            } else {
+              this._drawCtx.imageSmoothingEnabled = false;
+              this._drawCtx.drawImage(this._backbuffer, oldX, oldY, w, h, newX, newY, w, h);
+              this._damage(newX, newY, w, h);
+            }
+          }
+          
+          getImageData() {
+            return this._drawCtx.getImageData(0, 0, this.width, this.height);
+          }
+          
+          toDataURL(type, encoderOptions) {
+            return this._backbuffer.toDataURL(type, encoderOptions);
+          }
+          
+          toBlob(callback, type, quality) {
+            return this._backbuffer.toBlob(callback, type, quality);
+          }
+          
+          blitImage(x, y, width, height, arr, offset, fromQueue) {
+            if (this._renderQ.length !== 0 && !fromQueue) {
+              const newArr = new Uint8Array(width * height * 4);
+              newArr.set(new Uint8Array(arr.buffer, 0, newArr.length));
+              this._renderQPush({ type: 'blit', data: newArr, x, y, width, height });
+            } else {
+              const data = new Uint8ClampedArray(arr.buffer, arr.byteOffset + offset, width * height * 4);
+              const img = new ImageData(data, width, height);
+              this._drawCtx.putImageData(img, x, y);
+              this._damage(x, y, width, height);
+            }
+          }
+        }
+        module.exports = {
+          default: Display,
+          __esModule: true
+        };
+        return module.exports;
+      }
+      
+      if (normalizedPath.includes('inflator.js')) {
+        class Inflator {
+          constructor() {
+            this.inflateData = null;
+          }
+          inflate(data, compressedData) {
+            // 简化实现，返回原始数据
+            return data;
+          }
+        }
+        module.exports = {
+          default: Inflator,
+          __esModule: true
+        };
+        return module.exports;
+      }
+      
+      if (normalizedPath.includes('deflator.js')) {
+        class Deflator {
+          constructor() {
+            this.deflateData = null;
+          }
+          deflate(data) {
+            // 简化实现，返回原始数据
+            return data;
+          }
+        }
+        module.exports = {
+          default: Deflator,
+          __esModule: true
+        };
+        return module.exports;
+      }
+      
+      if (normalizedPath.includes('util/cursor.js')) {
+        // cursor.js需要依赖browser.js，并且需要是一个完整的类
+        // 先获取browser模块
+        const browser = require('./util/browser.js');
+        const useFallback = !browser.supportsCursorURIs || browser.isTouchDevice;
+        
+        class Cursor {
+          constructor() {
+            this._target = null;
+            this._canvas = document.createElement('canvas');
+            if (useFallback) {
+              this._canvas.style.position = 'fixed';
+              this._canvas.style.zIndex = '65535';
+              this._canvas.style.pointerEvents = 'none';
+              this._canvas.style.userSelect = 'none';
+              this._canvas.style.WebkitUserSelect = 'none';
+              this._canvas.style.visibility = 'hidden';
+            }
+            this._position = { x: 0, y: 0 };
+            this._hotSpot = { x: 0, y: 0 };
+            this._eventHandlers = {};
+          }
+          attach(target) {
+            if (this._target) {
+              this.detach();
+            }
+            this._target = target;
+            if (useFallback) {
+              document.body.appendChild(this._canvas);
+            }
+            this.clear();
+          }
+          detach() {
+            if (!this._target) {
+              return;
+            }
+            if (useFallback) {
+              if (document.contains(this._canvas)) {
+                document.body.removeChild(this._canvas);
+              }
+            }
+            this._target = null;
+          }
+          change(rgba, hotx, hoty, w, h) {
+            if (w === 0 || h === 0) {
+              this.clear();
+              return;
+            }
+            this._position.x = this._position.x + this._hotSpot.x - hotx;
+            this._position.y = this._position.y + this._hotSpot.y - hoty;
+            this._hotSpot.x = hotx;
+            this._hotSpot.y = hoty;
+            // 简化实现
+          }
+          clear() {
+            if (this._target) {
+              this._target.style.cursor = 'default';
+            }
+          }
+        }
+        module.exports = {
+          default: Cursor,
+          __esModule: true
+        };
+        return module.exports;
+      }
+      
+      if (normalizedPath.includes('input/keyboard.js')) {
+        class Keyboard {
+          constructor(target) {
+            this._target = target || null;
+            this._keyDownList = {};
+            this._altGrArmed = false;
+            this._eventHandlers = {
+              'keyup': this._handleKeyUp.bind(this),
+              'keydown': this._handleKeyDown.bind(this),
+              'blur': this._allKeysUp.bind(this)
+            };
+            this.onkeyevent = function() {}; // Handler for key press/release
+          }
+          
+          _handleKeyDown(e) {
+            // 简化实现
+            e.stopPropagation();
+            e.preventDefault();
+          }
+          
+          _handleKeyUp(e) {
+            // 简化实现
+            e.stopPropagation();
+            e.preventDefault();
+          }
+          
+          _allKeysUp() {
+            // 释放所有按键
+            for (let code in this._keyDownList) {
+              delete this._keyDownList[code];
+            }
+          }
+          
+          grab() {
+            if (this._target) {
+              this._target.addEventListener('keydown', this._eventHandlers.keydown);
+              this._target.addEventListener('keyup', this._eventHandlers.keyup);
+              window.addEventListener('blur', this._eventHandlers.blur);
+            }
+          }
+          
+          ungrab() {
+            if (this._target) {
+              this._target.removeEventListener('keydown', this._eventHandlers.keydown);
+              this._target.removeEventListener('keyup', this._eventHandlers.keyup);
+              window.removeEventListener('blur', this._eventHandlers.blur);
+            }
+            this._allKeysUp();
+          }
+        }
+        module.exports = {
+          default: Keyboard,
+          __esModule: true
+        };
+        return module.exports;
+      }
+      
+      if (normalizedPath.includes('input/gesturehandler.js')) {
+        class GestureHandler {
+          constructor() {
+            this._target = null;
+            this._boundEventHandler = this._eventHandler.bind(this);
+          }
+          
+          _eventHandler(e) {
+            // 简化实现
+            e.stopPropagation();
+            e.preventDefault();
+          }
+          
+          attach(target) {
+            this.detach();
+            this._target = target;
+            if (this._target) {
+              this._target.addEventListener('touchstart', this._boundEventHandler);
+              this._target.addEventListener('touchmove', this._boundEventHandler);
+              this._target.addEventListener('touchend', this._boundEventHandler);
+              this._target.addEventListener('touchcancel', this._boundEventHandler);
+            }
+          }
+          
+          detach() {
+            if (this._target) {
+              this._target.removeEventListener('touchstart', this._boundEventHandler);
+              this._target.removeEventListener('touchmove', this._boundEventHandler);
+              this._target.removeEventListener('touchend', this._boundEventHandler);
+              this._target.removeEventListener('touchcancel', this._boundEventHandler);
+              this._target = null;
+            }
+          }
+        }
+        module.exports = {
+          default: GestureHandler,
+          __esModule: true
+        };
+        return module.exports;
+      }
+      
+      if (normalizedPath.includes('input/keysym.js')) {
+        module.exports = {
+          default: {},
+          __esModule: true
+        };
+        return module.exports;
+      }
+      
+      if (normalizedPath.includes('input/xtscancodes.js')) {
+        module.exports = {
+          default: {},
+          __esModule: true
+        };
+        return module.exports;
+      }
+      
+      if (normalizedPath.includes('input/util.js')) {
+        // input/util.js需要导出getKeycode和getKeysym函数
+        module.exports = {
+          getKeycode: function(e) {
+            return e.code || 'Unidentified';
+          },
+          getKeysym: function(e) {
+            // 简化实现，返回0表示未识别
+            return 0;
+          },
+          __esModule: true
+        };
+        return module.exports;
+      }
+      
+      if (normalizedPath.includes('input/')) {
+        module.exports = {
+          default: {},
+          __esModule: true
+        };
+        return module.exports;
+      }
+      
+      if (normalizedPath.includes('base64.js')) {
+        module.exports = {
+          default: {
+            encode: (data) => btoa(String.fromCharCode(...new Uint8Array(data))),
+            decode: (str) => Uint8Array.from(atob(str), c => c.charCodeAt(0))
+          },
+          __esModule: true
+        };
+        return module.exports;
+      }
+      
+      if (normalizedPath.includes('encodings.js')) {
+        // encodings.js需要导出encodings对象和encodingName函数
+        const encodings = {
+          encodingRaw: 0,
+          encodingCopyRect: 1,
+          encodingRRE: 2,
+          encodingHextile: 5,
+          encodingZlib: 6,
+          encodingTight: 7,
+          encodingZRLE: 16,
+          encodingTightPNG: -260,
+          encodingJPEG: 21,
+          encodingH264: 50,
+          pseudoEncodingQualityLevel9: -23,
+          pseudoEncodingQualityLevel0: -32,
+          pseudoEncodingDesktopSize: -223,
+          pseudoEncodingLastRect: -224,
+          pseudoEncodingCursor: -239,
+          pseudoEncodingQEMUExtendedKeyEvent: -258,
+          pseudoEncodingQEMULedEvent: -261,
+          pseudoEncodingDesktopName: -307,
+          pseudoEncodingExtendedDesktopSize: -308,
+          pseudoEncodingXvp: -309,
+          pseudoEncodingFence: -312,
+          pseudoEncodingContinuousUpdates: -313,
+          pseudoEncodingExtendedMouseButtons: -316,
+          pseudoEncodingCompressLevel9: -247,
+          pseudoEncodingCompressLevel0: -256,
+          pseudoEncodingVMwareCursor: 0x574d5664,
+          pseudoEncodingExtendedClipboard: 0xc0a1e5ce
+        };
+        
+        function encodingName(num) {
+          switch (num) {
+            case encodings.encodingRaw: return "Raw";
+            case encodings.encodingCopyRect: return "CopyRect";
+            case encodings.encodingRRE: return "RRE";
+            case encodings.encodingHextile: return "Hextile";
+            case encodings.encodingZlib: return "Zlib";
+            case encodings.encodingTight: return "Tight";
+            case encodings.encodingZRLE: return "ZRLE";
+            case encodings.encodingTightPNG: return "TightPNG";
+            case encodings.encodingJPEG: return "JPEG";
+            case encodings.encodingH264: return "H.264";
+            default: return "[unknown encoding " + num + "]";
+          }
+        }
+        
+        module.exports = {
+          encodings: encodings,
+          encodingName: encodingName,
+          __esModule: true
+        };
+        return module.exports;
+      }
+      
+      if (normalizedPath.includes('ra2.js')) {
+        module.exports = {
+          default: {},
+          __esModule: true
+        };
+        return module.exports;
+      }
+      
+      if (normalizedPath.includes('crypto/crypto.js')) {
+        module.exports = {
+          default: {},
+          __esModule: true
+        };
+        return module.exports;
+      }
+      
+      if (normalizedPath.includes('decoders/raw.js')) {
+        class RawDecoder {
+          constructor() {
+            this._lines = 0;
+          }
+          decodeRect(x, y, width, height, sock, display, depth) {
+            // 简化实现
+            return true;
+          }
+        }
+        module.exports = {
+          default: RawDecoder,
+          __esModule: true
+        };
+        return module.exports;
+      }
+      
+      if (normalizedPath.includes('decoders/copyrect.js')) {
+        class CopyRectDecoder {
+          constructor() {}
+          decodeRect(x, y, width, height, sock, display, depth) {
+            // 简化实现
+            return true;
+          }
+        }
+        module.exports = {
+          default: CopyRectDecoder,
+          __esModule: true
+        };
+        return module.exports;
+      }
+      
+      if (normalizedPath.includes('decoders/rre.js')) {
+        class RREDecoder {
+          constructor() {}
+          decodeRect(x, y, width, height, sock, display, depth) {
+            // 简化实现
+            return true;
+          }
+        }
+        module.exports = {
+          default: RREDecoder,
+          __esModule: true
+        };
+        return module.exports;
+      }
+      
+      if (normalizedPath.includes('decoders/hextile.js')) {
+        class HextileDecoder {
+          constructor() {}
+          decodeRect(x, y, width, height, sock, display, depth) {
+            // 简化实现
+            return true;
+          }
+        }
+        module.exports = {
+          default: HextileDecoder,
+          __esModule: true
+        };
+        return module.exports;
+      }
+      
+      if (normalizedPath.includes('decoders/zlib.js')) {
+        class ZlibDecoder {
+          constructor() {}
+          decodeRect(x, y, width, height, sock, display, depth) {
+            // 简化实现
+            return true;
+          }
+        }
+        module.exports = {
+          default: ZlibDecoder,
+          __esModule: true
+        };
+        return module.exports;
+      }
+      
+      if (normalizedPath.includes('decoders/tight.js')) {
+        class TightDecoder {
+          constructor() {}
+          decodeRect(x, y, width, height, sock, display, depth) {
+            // 简化实现
+            return true;
+          }
+        }
+        module.exports = {
+          default: TightDecoder,
+          __esModule: true
+        };
+        return module.exports;
+      }
+      
+      if (normalizedPath.includes('decoders/tightpng.js')) {
+        class TightPNGDecoder {
+          constructor() {}
+          decodeRect(x, y, width, height, sock, display, depth) {
+            // 简化实现
+            return true;
+          }
+        }
+        module.exports = {
+          default: TightPNGDecoder,
+          __esModule: true
+        };
+        return module.exports;
+      }
+      
+      if (normalizedPath.includes('decoders/jpeg.js')) {
+        class JPEGDecoder {
+          constructor() {}
+          decodeRect(x, y, width, height, sock, display, depth) {
+            // 简化实现
+            return true;
+          }
+        }
+        module.exports = {
+          default: JPEGDecoder,
+          __esModule: true
+        };
+        return module.exports;
+      }
+      
+      if (normalizedPath.includes('decoders/zrle.js')) {
+        class ZRLEDecoder {
+          constructor() {}
+          decodeRect(x, y, width, height, sock, display, depth) {
+            // 简化实现
+            return true;
+          }
+        }
+        module.exports = {
+          default: ZRLEDecoder,
+          __esModule: true
+        };
+        return module.exports;
+      }
+      
+      if (normalizedPath.includes('decoders/h264.js')) {
+        class H264Decoder {
+          constructor() {}
+          decodeRect(x, y, width, height, sock, display, depth) {
+            // 简化实现
+            return true;
+          }
+        }
+        module.exports = {
+          default: H264Decoder,
+          __esModule: true
+        };
+        return module.exports;
+      }
+      
+      if (normalizedPath.includes('decoders/')) {
+        // 其他decoder
+        class GenericDecoder {
+          constructor() {}
+          decodeRect(x, y, width, height, sock, display, depth) {
+            // 简化实现
+            return true;
+          }
+        }
+        module.exports = {
+          default: GenericDecoder,
+          __esModule: true
+        };
+        return module.exports;
+      }
+      
+      if (normalizedPath.includes('websock.js')) {
+        // websock.js需要是一个完整的Websock类，实现所有必需的方法
+        class Websock {
+          constructor() {
+            this._websocket = null;
+            this._rQi = 0; // Receive queue index
+            this._rQlen = 0; // Next write position in the receive queue
+            this._rQbufferSize = 1024 * 1024 * 4; // 4 MiB
+            this._rQ = null; // Receive queue
+            
+            this._sQbufferSize = 1024 * 10; // 10 KiB
+            this._sQlen = 0;
+            this._sQ = null; // Send queue
+            
+            this._eventHandlers = {
+              message: function() {},
+              open: function() {},
+              close: function() {},
+              error: function() {}
+            };
+          }
+          
+          get readyState() {
+            if (this._websocket === null) {
+              return 'unused';
+            }
+            const subState = this._websocket.readyState;
+            if (subState === 0 || subState === 'connecting') {
+              return 'connecting';
+            } else if (subState === 1 || subState === 'open') {
+              return 'open';
+            } else if (subState === 2 || subState === 'closing') {
+              return 'closing';
+            } else if (subState === 3 || subState === 'closed') {
+              return 'closed';
+            }
+            return 'unknown';
+          }
+          
+          on(evt, handler) {
+            this._eventHandlers[evt] = handler;
+          }
+          
+          off(evt) {
+            this._eventHandlers[evt] = function() {};
+          }
+          
+          init() {
+            this._rQ = new Uint8Array(this._rQbufferSize);
+            this._sQ = new Uint8Array(this._sQbufferSize);
+            this._rQi = 0;
+            this._rQlen = 0;
+            this._sQlen = 0;
+            this._websocket = null;
+          }
+          
+          open(uri, protocols) {
+            this.attach(new window.WebSocket(uri, protocols));
+          }
+          
+          attach(rawChannel) {
+            const _this = this;
+            this.init();
+            this._websocket = rawChannel;
+            this._websocket.binaryType = 'arraybuffer';
+            
+            this._websocket.onmessage = function(e) {
+              _this._recvMessage(e);
+            };
+            
+            this._websocket.onopen = function() {
+              _this._eventHandlers.open();
+            };
+            
+            this._websocket.onclose = function(e) {
+              _this._eventHandlers.close(e);
+            };
+            
+            this._websocket.onerror = function(e) {
+              _this._eventHandlers.error(e);
+            };
+          }
+          
+          _recvMessage(e) {
+            if (this._rQlen === this._rQi) {
+              this._rQlen = 0;
+              this._rQi = 0;
+            }
+            const u8 = new Uint8Array(e.data);
+            if (u8.length > this._rQbufferSize - this._rQlen) {
+              this._expandCompactRQ(u8.length);
+            }
+            this._rQ.set(u8, this._rQlen);
+            this._rQlen += u8.length;
+            if (this._rQlen - this._rQi > 0) {
+              this._eventHandlers.message();
+            }
+          }
+          
+          _expandCompactRQ(minFit) {
+            const requiredBufferSize = (this._rQlen - this._rQi + minFit) * 8;
+            const resizeNeeded = this._rQbufferSize < requiredBufferSize;
+            if (resizeNeeded) {
+              this._rQbufferSize = Math.max(this._rQbufferSize * 2, requiredBufferSize);
+            }
+            if (resizeNeeded) {
+              const oldRQbuffer = this._rQ.buffer;
+              this._rQ = new Uint8Array(this._rQbufferSize);
+              this._rQ.set(new Uint8Array(oldRQbuffer, this._rQi, this._rQlen - this._rQi));
+            } else {
+              this._rQ.copyWithin(0, this._rQi, this._rQlen);
+            }
+            this._rQlen = this._rQlen - this._rQi;
+            this._rQi = 0;
+          }
+          
+          rQpeek8() {
+            return this._rQ[this._rQi];
+          }
+          
+          rQskipBytes(bytes) {
+            this._rQi += bytes;
+          }
+          
+          rQshift8() {
+            return this._rQshift(1);
+          }
+          
+          rQshift16() {
+            return this._rQshift(2);
+          }
+          
+          rQshift32() {
+            return this._rQshift(4);
+          }
+          
+          _rQshift(bytes) {
+            let res = 0;
+            for (let _byte = bytes - 1; _byte >= 0; _byte--) {
+              res += this._rQ[this._rQi++] << (_byte * 8);
+            }
+            return res >>> 0;
+          }
+          
+          rQshiftStr(len) {
+            let str = '';
+            for (let i = 0; i < len; i += 4096) {
+              const part = this.rQshiftBytes(Math.min(4096, len - i), false);
+              str += String.fromCharCode.apply(null, part);
+            }
+            return str;
+          }
+          
+          rQshiftBytes(len, copy = true) {
+            this._rQi += len;
+            if (copy) {
+              return this._rQ.slice(this._rQi - len, this._rQi);
+            } else {
+              return this._rQ.subarray(this._rQi - len, this._rQi);
+            }
+          }
+          
+          rQwait(msg, num, goback) {
+            if (this._rQlen - this._rQi < num) {
+              if (goback) {
+                if (this._rQi < goback) {
+                  throw new Error('rQwait cannot backup ' + goback + ' bytes');
+                }
+                this._rQi -= goback;
+              }
+              return true;
+            }
+            return false;
+          }
+          
+          sQpush8(num) {
+            this._sQensureSpace(1);
+            this._sQ[this._sQlen++] = num;
+          }
+          
+          sQpush16(num) {
+            this._sQensureSpace(2);
+            this._sQ[this._sQlen++] = (num >> 8) & 0xff;
+            this._sQ[this._sQlen++] = (num >> 0) & 0xff;
+          }
+          
+          sQpush32(num) {
+            this._sQensureSpace(4);
+            this._sQ[this._sQlen++] = (num >> 24) & 0xff;
+            this._sQ[this._sQlen++] = (num >> 16) & 0xff;
+            this._sQ[this._sQlen++] = (num >> 8) & 0xff;
+            this._sQ[this._sQlen++] = (num >> 0) & 0xff;
+          }
+          
+          sQpushString(str) {
+            const bytes = str.split('').map(chr => chr.charCodeAt(0));
+            this.sQpushBytes(new Uint8Array(bytes));
+          }
+          
+          sQpushBytes(bytes) {
+            for (let offset = 0; offset < bytes.length;) {
+              this._sQensureSpace(1);
+              let chunkSize = this._sQbufferSize - this._sQlen;
+              if (chunkSize > bytes.length - offset) {
+                chunkSize = bytes.length - offset;
+              }
+              this._sQ.set(bytes.subarray(offset, offset + chunkSize), this._sQlen);
+              this._sQlen += chunkSize;
+              offset += chunkSize;
+            }
+          }
+          
+          _sQensureSpace(bytes) {
+            if (this._sQbufferSize - this._sQlen < bytes) {
+              this.flush();
+            }
+          }
+          
+          flush() {
+            if (this._sQlen > 0 && this.readyState === 'open') {
+              this._websocket.send(new Uint8Array(this._sQ.buffer, 0, this._sQlen));
+              this._sQlen = 0;
+            }
+          }
+          
+          close() {
+            if (this._websocket) {
+              if (this.readyState === 'connecting' || this.readyState === 'open') {
+                this._websocket.close();
+              }
+              this._websocket.onmessage = function() {};
+            }
+          }
+        }
+        module.exports = {
+          default: Websock,
+          __esModule: true
+        };
+        return module.exports;
+      }
+      
+      // 对于其他模块，返回空对象
+      module.exports = {
+        __esModule: true
+      };
+      return module.exports;
+    }
+    
+    window.module = { exports: {} };
+    window.exports = window.module.exports;
+    window.require = require;
+    
+    if (typeof global === 'undefined') {
+      window.global = window;
+    }
+    
+    // 加载rfb.js
+    const script = document.createElement('script');
+    script.src = baseUrl + 'rfb.js';
+    
+    script.onload = () => {
+      setTimeout(() => {
+        let RFB = null;
+        
+        if (window.module && window.module.exports) {
+          const exp = window.module.exports;
+          if (exp.default && typeof exp.default === 'function') {
+            RFB = exp.default;
+            console.log('✅ 从module.exports.default获取RFB');
+          } else if (typeof exp === 'function') {
+            RFB = exp;
+            console.log('✅ 从module.exports获取RFB (函数)');
+          } else if (exp.RFB && typeof exp.RFB === 'function') {
+            RFB = exp.RFB;
+            console.log('✅ 从module.exports.RFB获取RFB');
+          }
+        }
+        
+        if (window.RFB && typeof window.RFB === 'function') {
+          RFB = window.RFB;
+          console.log('✅ 从window.RFB获取RFB');
+        }
+        
+        if (!RFB || typeof RFB !== 'function') {
+          console.error('❌ 无法加载RFB库');
+          console.error('module.exports:', window.module ? window.module.exports : 'undefined');
+          console.error('window.RFB:', window.RFB);
+          console.error('EventTargetMixin类型:', typeof EventTargetMixin);
+          document.body.innerHTML = '<div style="color: white; text-align: center; padding: 50px;">无法加载RFB库<br>请查看控制台获取详细信息</div>';
+          return;
+        }
+        
+        console.log('✅ RFB加载成功，创建VNC连接...');
+        console.log('RFB类型:', typeof RFB);
+        console.log('EventTargetMixin类型:', typeof EventTargetMixin);
+        
+        // 创建VNC连接
+        const rfb = new RFB(canvas, wsUrl, {
+          credentials: {
+            password: ''
+          }
+        });
+        
+        rfb.scaleViewport = true;
+        rfb.resizeSession = false;
+        
+        rfb.addEventListener('connect', () => {
+          console.log('✅ VNC连接成功');
+        });
+        
+        rfb.addEventListener('disconnect', (e) => {
+          console.log('VNC断开连接:', e.detail);
+        });
+        
+        rfb.addEventListener('credentialsrequired', () => {
+          console.log('需要VNC密码');
+        });
+        
+      }, 1500);
+    };
+    
+    script.onerror = () => {
+      document.body.innerHTML = '<div style="color: white; text-align: center; padding: 50px;">加载noVNC库失败</div>';
+    };
+    
+    document.head.appendChild(script);
+  </script>
+</body>
+</html>
