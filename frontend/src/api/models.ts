@@ -13,11 +13,11 @@ export interface Model {
 }
 
 export interface ModelConfig {
-  apiEndpoint: string  // MinIO API端点，例如: 100.93.0.8:32000
-  webConsole?: string  // MinIO Web控制台，例如: 100.93.0.8:32081
-  accessKey: string    // MinIO用户名
-  secretKey: string    // MinIO密码
-  bucket: string       // MinIO存储桶名称，例如: models
+  apiEndpoint: string  // 云端仓库API端点，例如: 100.93.0.8:32000
+  webConsole?: string  // 云端仓库Web控制台，例如: 100.93.0.8:32081
+  accessKey: string    // 云端仓库用户名
+  secretKey: string    // 云端仓库密码
+  bucket: string       // 云端仓库存储桶名称，例如: models
   useSSL?: boolean     // 是否使用SSL，默认false
   syncInterval: 'manual' | 'hourly' | 'daily' | 'weekly'
   autoSync: boolean
@@ -71,6 +71,9 @@ export const modelsApi = {
   },
   deleteModel: (id: number): Promise<{ message: string }> => {
     return api.delete(`/models/${id}`)
+  },
+  updateModel: (id: number, data: { name: string; version?: string; type: string; description?: string }): Promise<Model> => {
+    return api.put(`/models/${id}`, data)
   },
   getModelConfig: (): Promise<ModelConfig> => {
     return api.get('/models/config/repository')

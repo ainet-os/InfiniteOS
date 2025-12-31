@@ -61,7 +61,7 @@
 
           <form @submit.prevent="handleSaveConfig" class="p-6 space-y-6">
             <div>
-              <h3 class="text-lg font-medium text-gray-800 dark:text-white/90 mb-4">MinIO仓库配置</h3>
+              <h3 class="text-lg font-medium text-gray-800 dark:text-white/90 mb-4">云端仓库配置</h3>
               <div class="space-y-4">
                 <div>
                   <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -75,7 +75,7 @@
                     placeholder="例如: 100.93.0.8:32000"
                   />
                   <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                    MinIO API服务端点（IP:端口）
+                    云端仓库API服务端点（IP:端口）
                   </p>
                 </div>
 
@@ -90,7 +90,7 @@
                     placeholder="例如: 100.93.0.8:32081"
                   />
                   <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                    MinIO Web控制台地址（可选，用于访问Web界面）
+                    云端仓库Web控制台地址（可选，用于访问Web界面）
                   </p>
                 </div>
 
@@ -134,7 +134,7 @@
                     placeholder="例如: models"
                   />
                   <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                    MinIO存储桶名称，模型文件将存储在此桶中
+                    云端仓库存储桶名称，模型文件将存储在此桶中
                   </p>
                 </div>
 
@@ -186,7 +186,7 @@
                 </svg>
                 <div class="text-sm text-blue-700 dark:text-blue-300">
                   <p class="font-medium mb-1">提示</p>
-                  <p>配置MinIO对象存储作为模型仓库。请确保API端点、用户名、密码和存储桶名称配置正确，系统将使用这些信息连接MinIO并同步/上传模型。</p>
+                  <p>配置云端仓库作为模型仓库。请确保API端点、用户名、密码和存储桶名称配置正确，系统将使用这些信息连接云端仓库并同步/上传模型。</p>
                 </div>
               </div>
             </div>
@@ -574,112 +574,219 @@
             </div>
           </div>
           <!-- 有数据状态 -->
-          <table v-else class="w-full">
-            <thead class="bg-gray-50 dark:bg-white/[0.02]">
-              <tr>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-400 uppercase">{{ $t('common.modelName') }}</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-400 uppercase">{{ $t('common.version') }}</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-400 uppercase">{{ $t('common.type') }}</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-400 uppercase">{{ $t('common.source') }}</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-400 uppercase">{{ $t('common.size') }}</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-400 uppercase">文件</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-400 uppercase">{{ $t('common.status') }}</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-400 uppercase">{{ $t('common.actions') }}</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-gray-200 dark:divide-gray-800">
-              <tr v-for="model in models" :key="model.id" class="hover:bg-gray-50 dark:hover:bg-white/[0.02]">
-                <td class="px-6 py-4">
-                  <div class="flex items-center">
-                    <div>
-                      <div class="text-sm font-medium text-gray-800 dark:text-white/90">{{ model.name }}</div>
-                      <div v-if="model.description" class="text-xs text-gray-500 dark:text-gray-500 mt-1">
+          <div v-else class="overflow-x-auto">
+            <table class="w-full min-w-[1000px]">
+              <thead class="bg-gray-50 dark:bg-white/[0.02]">
+                <tr>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-400 uppercase whitespace-nowrap">{{ $t('common.modelName') }}</th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-400 uppercase whitespace-nowrap">{{ $t('common.version') }}</th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-400 uppercase whitespace-nowrap">{{ $t('common.type') }}</th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-400 uppercase whitespace-nowrap">{{ $t('common.source') }}</th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-400 uppercase whitespace-nowrap">{{ $t('common.size') }}</th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-400 uppercase whitespace-nowrap">文件</th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-400 uppercase whitespace-nowrap">{{ $t('common.status') }}</th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-400 uppercase whitespace-nowrap">{{ $t('common.actions') }}</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-gray-200 dark:divide-gray-800">
+                <tr v-for="model in models" :key="model.id" class="hover:bg-gray-50 dark:hover:bg-white/[0.02]">
+                  <td class="px-6 py-4">
+                    <div class="max-w-xs">
+                      <div class="text-sm font-medium text-gray-800 dark:text-white/90 break-words">{{ model.name }}</div>
+                      <div v-if="model.description" class="text-xs text-gray-500 dark:text-gray-500 mt-1 break-words">
                         {{ model.description }}
                       </div>
                     </div>
-                  </div>
-                </td>
-                <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ model.version || '-' }}</td>
-                <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
-                  <span class="px-2 py-1 text-xs rounded bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300">
-                    {{ getTypeLabel(model.type) }}
-                  </span>
-                </td>
-                <td class="px-6 py-4 text-sm">
-                  <span
-                    :class="[
-                      'px-2 py-1 text-xs rounded',
-                      model.source === 'cloud'
-                        ? 'bg-blue-500/10 text-blue-500'
-                        : 'bg-green-500/10 text-green-500',
-                    ]"
-                  >
-                    {{ model.source === 'cloud' ? $t('common.cloudSync') : $t('common.localUpload') }}
-                  </span>
-                </td>
-                <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ model.size }}</td>
-                <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
-                  <div v-if="model.files && model.files.length > 0" class="max-w-xs">
-                    <div class="flex flex-wrap gap-1">
-                      <span
-                        v-for="(file, index) in model.files.slice(0, 3)"
-                        :key="index"
-                        class="px-2 py-0.5 text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded truncate"
-                        :title="file"
-                      >
-                        {{ file }}
-                      </span>
-                      <span
-                        v-if="model.files.length > 3"
-                        class="px-2 py-0.5 text-xs bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 rounded"
-                        :title="model.files.slice(3).join(', ')"
-                      >
-                        +{{ model.files.length - 3 }}
-                      </span>
+                  </td>
+                  <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">{{ model.version || '-' }}</td>
+                  <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">
+                    <span class="px-2 py-1 text-xs rounded bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300">
+                      {{ getTypeLabel(model.type) }}
+                    </span>
+                  </td>
+                  <td class="px-6 py-4 text-sm whitespace-nowrap">
+                    <span
+                      :class="[
+                        'px-2 py-1 text-xs rounded',
+                        model.source === 'cloud'
+                          ? 'bg-blue-500/10 text-blue-500'
+                          : 'bg-green-500/10 text-green-500',
+                      ]"
+                    >
+                      {{ model.source === 'cloud' ? $t('common.cloudSync') : $t('common.localUpload') }}
+                    </span>
+                  </td>
+                  <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">{{ model.size }}</td>
+                  <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
+                    <div v-if="model.files && model.files.length > 0" class="max-w-xs">
+                      <div class="flex flex-wrap gap-1">
+                        <span
+                          v-for="(file, index) in model.files.slice(0, 3)"
+                          :key="index"
+                          class="px-2 py-0.5 text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded break-words"
+                          :title="file"
+                        >
+                          {{ file }}
+                        </span>
+                        <span
+                          v-if="model.files.length > 3"
+                          class="px-2 py-0.5 text-xs bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 rounded"
+                          :title="model.files.slice(3).join(', ')"
+                        >
+                          +{{ model.files.length - 3 }}
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                  <span v-else class="text-gray-400 dark:text-gray-500">-</span>
-                </td>
-                <td class="px-6 py-4 text-sm">
-                  <span
-                    :class="[
-                      'px-2 py-1 text-xs rounded',
-                      model.status === 'ready'
-                        ? 'bg-success-500/10 text-success-500'
-                        : model.status === 'syncing'
-                        ? 'bg-warning-500/10 text-warning-500'
-                        : 'bg-gray-500/10 text-gray-500',
-                    ]"
+                    <span v-else class="text-gray-400 dark:text-gray-500">-</span>
+                  </td>
+                  <td class="px-6 py-4 text-sm whitespace-nowrap">
+                    <span
+                      :class="[
+                        'px-2 py-1 text-xs rounded',
+                        model.status === 'ready'
+                          ? 'bg-success-500/10 text-success-500'
+                          : model.status === 'syncing'
+                          ? 'bg-warning-500/10 text-warning-500'
+                          : 'bg-gray-500/10 text-gray-500',
+                      ]"
+                    >
+                      {{ getStatusLabel(model.status) }}
+                    </span>
+                  </td>
+                  <td class="px-6 py-4 text-sm whitespace-nowrap">
+                    <div class="flex gap-2">
+                      <button
+                        @click="viewModel(model.id)"
+                        class="px-2.5 py-1.5 text-xs bg-brand-500 dark:bg-brand-500 text-white rounded hover:bg-brand-600 dark:hover:bg-brand-600 transition-colors"
+                      >
+                        {{ $t('common.view') }}
+                      </button>
+                      <button
+                        @click="showEditDialog(model)"
+                        class="px-2.5 py-1.5 text-xs bg-gray-500 dark:bg-gray-600 text-white rounded hover:bg-gray-600 dark:hover:bg-gray-700 transition-colors"
+                      >
+                        {{ $t('common.edit') }}
+                      </button>
+                      <button
+                        v-if="model.status === 'ready'"
+                        @click="showDeployDialog(model)"
+                        class="px-2.5 py-1.5 text-xs bg-success-600 dark:bg-success-500 text-white rounded hover:bg-success-700 dark:hover:bg-success-600 transition-colors"
+                      >
+                        {{ $t('common.deploy') }}
+                      </button>
+                      <button
+                        @click="deleteModel(model.id)"
+                        class="px-2.5 py-1.5 text-xs bg-error-600 dark:bg-error-500 text-white rounded hover:bg-error-700 dark:hover:bg-error-600 transition-colors"
+                      >
+                        {{ $t('common.delete') }}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- 编辑模型对话框 -->
+      <div
+        v-if="showEditDialogFlag && currentEditModel"
+        class="fixed inset-0 z-[100000] flex items-center justify-center bg-black/50 dark:bg-black/70"
+        @click.self="showEditDialogFlag = false"
+      >
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto m-4">
+          <div class="sticky top-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4 flex items-center justify-between">
+            <h2 class="text-xl font-semibold text-gray-800 dark:text-white/90">编辑模型</h2>
+            <button
+              @click="showEditDialogFlag = false"
+              class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+            >
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+
+          <form @submit.prevent="handleUpdateModel" class="p-6 space-y-6">
+            <div>
+              <h3 class="text-lg font-medium text-gray-800 dark:text-white/90 mb-4">模型信息</h3>
+              <div class="space-y-4">
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    {{ $t('common.modelName') }} <span class="text-error-500">*</span>
+                  </label>
+                  <input
+                    v-model="editForm.name"
+                    type="text"
+                    required
+                    class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white/90 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+                    placeholder="例如: llama-2-7b-chat"
+                  />
+                </div>
+
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    {{ $t('common.version') }}
+                  </label>
+                  <input
+                    v-model="editForm.version"
+                    type="text"
+                    class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white/90 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+                    placeholder="例如: v1.0.0"
+                  />
+                </div>
+
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    {{ $t('common.type') }} <span class="text-error-500">*</span>
+                  </label>
+                  <select
+                    v-model="editForm.type"
+                    required
+                    class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white/90 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
                   >
-                    {{ getStatusLabel(model.status) }}
-                  </span>
-                </td>
-                <td class="px-6 py-4 text-sm">
-                  <div class="flex gap-2">
-                    <button
-                      @click="viewModel(model.id)"
-                      class="px-2.5 py-1.5 text-xs bg-brand-500 dark:bg-brand-500 text-white rounded hover:bg-brand-600 dark:hover:bg-brand-600 transition-colors"
-                    >
-                      {{ $t('common.view') }}
-                    </button>
-                    <button
-                      v-if="model.status === 'ready'"
-                      @click="showDeployDialog(model)"
-                      class="px-2.5 py-1.5 text-xs bg-success-600 dark:bg-success-500 text-white rounded hover:bg-success-700 dark:hover:bg-success-600 transition-colors"
-                    >
-                      {{ $t('common.deploy') }}
-                    </button>
-                    <button
-                      @click="deleteModel(model.id)"
-                      class="px-2.5 py-1.5 text-xs bg-error-600 dark:bg-error-500 text-white rounded hover:bg-error-700 dark:hover:bg-error-600 transition-colors"
-                    >
-                      {{ $t('common.delete') }}
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
+                    <option value="llm">{{ $t('common.modelTypeLLM') }}</option>
+                    <option value="embedding">{{ $t('common.modelTypeEmbedding') }}</option>
+                    <option value="vision">{{ $t('common.modelTypeVision') }}</option>
+                    <option value="multimodal">{{ $t('common.modelTypeMultimodal') }}</option>
+                    <option value="other">{{ $t('common.modelTypeOther') }}</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    {{ $t('common.description') }}
+                  </label>
+                  <textarea
+                    v-model="editForm.description"
+                    rows="4"
+                    class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white/90 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+                    placeholder="输入模型描述信息..."
+                  ></textarea>
+                </div>
+              </div>
+            </div>
+
+            <!-- 操作按钮 -->
+            <div class="flex justify-end gap-3 pt-4 border-t border-gray-200 dark:border-gray-700">
+              <button
+                type="button"
+                @click="showEditDialogFlag = false"
+                class="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+              >
+                {{ $t('common.cancel') }}
+              </button>
+              <button
+                type="submit"
+                :disabled="updating"
+                class="px-4 py-2 bg-brand-500 dark:bg-brand-500 text-white rounded-lg hover:bg-brand-600 dark:hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                <span v-if="updating">{{ $t('common.saving') }}</span>
+                <span v-else>{{ $t('common.save') }}</span>
+              </button>
+            </div>
+          </form>
         </div>
       </div>
 
@@ -1091,6 +1198,50 @@ const getStatusLabel = (status: string): string => {
 // 查看模型详情
 const showModelDetailDialog = ref(false)
 const currentModel = ref<Model | null>(null)
+
+// 编辑模型
+const showEditDialogFlag = ref(false)
+const currentEditModel = ref<Model | null>(null)
+const updating = ref(false)
+const editForm = ref({
+  name: '',
+  version: '',
+  type: 'llm',
+  description: '',
+})
+
+const showEditDialog = (model: Model) => {
+  currentEditModel.value = model
+  editForm.value = {
+    name: model.name,
+    version: model.version || '',
+    type: model.type || 'llm',
+    description: model.description || '',
+  }
+  showEditDialogFlag.value = true
+}
+
+const handleUpdateModel = async () => {
+  if (!currentEditModel.value) return
+  
+  updating.value = true
+  try {
+    await modelsApi.updateModel(currentEditModel.value.id, {
+      name: editForm.value.name,
+      version: editForm.value.version,
+      type: editForm.value.type,
+      description: editForm.value.description,
+    })
+    alert('模型信息更新成功')
+    showEditDialogFlag.value = false
+    await loadModels()
+  } catch (error: any) {
+    console.error('更新模型失败:', error)
+    alert(error?.error || '更新模型失败')
+  } finally {
+    updating.value = false
+  }
+}
 
 const viewModel = async (id: number) => {
   try {

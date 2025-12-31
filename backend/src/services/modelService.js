@@ -138,7 +138,7 @@ export const getModelDetails = async (modelId) => {
 }
 
 /**
- * 创建MinIO客户端
+ * 创建云端仓库客户端
  */
 const createMinioClient = (config) => {
   const [host, port] = config.apiEndpoint.split(':')
@@ -239,7 +239,7 @@ export const syncModels = async () => {
   const config = await readConfig()
   
   if (!config.apiEndpoint || !config.accessKey || !config.secretKey || !config.bucket) {
-    throw new Error('未完整配置MinIO仓库信息（需要API端点、用户名、密码和存储桶）')
+    throw new Error('未完整配置云端仓库信息（需要API端点、用户名、密码和存储桶）')
   }
 
   try {
@@ -302,7 +302,7 @@ export const syncModels = async () => {
         source: 'cloud',
         size: '0',
         status: 'ready',
-        description: '从MinIO同步的模型',
+        description: '从云端仓库同步的模型',
       }
 
       if (infoObj) {
@@ -381,18 +381,139 @@ export const syncModels = async () => {
     // 提供更友好的错误信息
     let errorMessage = '同步模型失败'
     if (error.code === 'InvalidAccessKeyId') {
-      errorMessage = 'MinIO认证失败：Access Key或Secret Key不正确，请检查配置'
+      errorMessage = '云端仓库认证失败：Access Key或Secret Key不正确，请检查配置'
     } else if (error.code === 'SignatureDoesNotMatch') {
-      errorMessage = 'MinIO认证失败：Secret Key不正确，请检查配置'
+      errorMessage = '云端仓库认证失败：Secret Key不正确，请检查配置'
     } else if (error.code === 'NoSuchBucket') {
       errorMessage = `存储桶 ${config.bucket} 不存在，请检查配置`
     } else if (error.message.includes('ECONNREFUSED') || error.message.includes('getaddrinfo')) {
-      errorMessage = `无法连接到MinIO服务器 ${config.apiEndpoint}，请检查网络连接和API端点配置`
+      errorMessage = `无法连接到云端仓库服务器 ${config.apiEndpoint}，请检查网络连接和API端点配置`
     } else if (error.message) {
       errorMessage = `同步模型失败: ${error.message}`
     }
     
     throw new Error(errorMessage)
+  }
+}
+
+/**
+ * 更新模型信息
+ */
+export const updateModel = async (modelId, modelData) => {
+  try {
+    console.log('更新模型:', { modelId, modelData })
+    const models = await getModels()
+    const model = models.find(m => m.id === modelId)
+    
+    if (!model) {
+      console.error('模型不存在，modelId:', modelId, '可用模型:', models.map(m => ({ id: m.id, name: m.name })))
+      throw new Error(`模型不存在 (ID: ${modelId})`)
+    }
+
+    console.log('找到模型:', { id: model.id, name: model.name })
+
+    const modelDir = path.join(MODELS_DIR, model.name)
+    const infoFile = path.join(modelDir, 'info.json')
+    
+    // 检查模型目录是否存在
+    try {
+      await fs.access(modelDir)
+      console.log('模型目录存在:', modelDir)
+    } catch (error) {
+      console.error('模型目录不存在:', modelDir)
+      throw new Error(`模型目录不存在: ${modelDir}`)
+    }
+    
+    // 读取现有信息
+    let info = {}
+    try {
+      const infoContent = await fs.readFile(infoFile, 'utf8')
+      info = JSON.parse(infoContent)
+      console.log('读取现有info.json成功:', Object.keys(info))
+    } catch (error) {
+      // 如果info.json不存在，创建新的
+      console.log('info.json不存在，创建新的')
+      info = {
+        name: model.name,
+        version: model.version || 'v1.0.0',
+        type: model.type || 'llm',
+        source: model.source || 'local',
+        size: model.size || '0',
+        status: model.status || 'ready',
+      }
+    }
+
+    // 更新信息
+    let finalModelDir = modelDir
+    if (modelData.name !== undefined && modelData.name && modelData.name.trim()) {
+      const newName = modelData.name.trim()
+      // 如果名称改变，需要重命名目录
+      if (newName !== model.name) {
+        const newModelDir = path.join(MODELS_DIR, newName)
+        // 检查新目录是否已存在
+        try {
+          await fs.access(newModelDir)
+          console.error('目标目录已存在:', newModelDir)
+          throw new Error(`模型名称 "${newName}" 已存在`)
+        } catch (error) {
+          if (error.message.includes('已存在')) {
+            throw error
+          }
+          // 目录不存在，可以重命名
+          console.log(`重命名模型目录: ${modelDir} -> ${newModelDir}`)
+          try {
+            await fs.rename(modelDir, newModelDir)
+            finalModelDir = newModelDir
+            info.name = newName
+            console.log('目录重命名成功')
+          } catch (renameError) {
+            console.error('目录重命名失败:', renameError)
+            throw new Error(`重命名模型目录失败: ${renameError.message}`)
+          }
+        }
+      } else {
+        info.name = newName
+      }
+    }
+    if (modelData.version !== undefined) {
+      info.version = modelData.version || ''
+    }
+    if (modelData.type !== undefined && modelData.type) {
+      info.type = modelData.type
+    }
+    if (modelData.description !== undefined) {
+      info.description = modelData.description || ''
+    }
+
+    // 保存更新后的信息
+    const finalInfoFile = path.join(finalModelDir, 'info.json')
+    console.log('保存info.json到:', finalInfoFile)
+    try {
+      await fs.writeFile(finalInfoFile, JSON.stringify(info, null, 2), 'utf8')
+      console.log('模型信息更新成功')
+    } catch (writeError) {
+      console.error('写入info.json失败:', writeError)
+      throw new Error(`保存模型信息失败: ${writeError.message}`)
+    }
+
+    // 返回更新后的模型信息（重新获取以确保ID正确）
+    const updatedModels = await getModels()
+    const updatedModel = updatedModels.find(m => m.name === info.name)
+    
+    return {
+      id: updatedModel ? updatedModel.id : modelId,
+      name: info.name,
+      version: info.version || '',
+      type: info.type,
+      source: info.source || model.source,
+      size: updatedModel ? updatedModel.size : info.size || '0',
+      status: info.status || model.status,
+      description: info.description || '',
+    }
+  } catch (error) {
+    console.error('updateModel错误:', error)
+    console.error('错误堆栈:', error.stack)
+    throw error
   }
 }
 

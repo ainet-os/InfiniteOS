@@ -7,6 +7,7 @@ import {
   uploadModel,
   syncModels,
   deleteModel,
+  updateModel,
   getModelConfig,
   updateModelConfig,
 } from '../services/modelService.js'
@@ -35,12 +36,41 @@ router.get('/', async (req, res) => {
 })
 
 /**
+ * 更新模型信息
+ * PUT /api/models/:id
+ */
+router.put('/:id', async (req, res) => {
+  try {
+    const modelId = parseInt(req.params.id)
+    if (isNaN(modelId)) {
+      return res.status(400).json({ error: '无效的模型ID' })
+    }
+    const modelData = {
+      name: req.body.name,
+      version: req.body.version,
+      type: req.body.type,
+      description: req.body.description,
+    }
+    console.log('收到更新模型请求:', { modelId, modelData })
+    const result = await updateModel(modelId, modelData)
+    res.json(result)
+  } catch (error) {
+    console.error('更新模型错误:', error)
+    console.error('错误堆栈:', error.stack)
+    res.status(500).json({ error: error.message || '更新模型失败' })
+  }
+})
+
+/**
  * 获取模型详情
  * GET /api/models/:id
  */
 router.get('/:id', async (req, res) => {
   try {
     const modelId = parseInt(req.params.id)
+    if (isNaN(modelId)) {
+      return res.status(400).json({ error: '无效的模型ID' })
+    }
     const details = await getModelDetails(modelId)
     
     if (!details) {
