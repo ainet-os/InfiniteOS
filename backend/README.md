@@ -1,6 +1,6 @@
 # InfiniteOS Backend API
 
-InfiniteOS 后端API服务器，提供边缘设备管理功能。
+InfiniteOS 后端API服务器，面向云边端一体化场景，提供完整的设备管理功能。
 
 ## 功能模块
 

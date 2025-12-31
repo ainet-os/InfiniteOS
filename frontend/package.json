@@ -2,7 +2,7 @@
   "name": "infiniteos",
   "version": "1.0.0",
   "private": true,
-  "description": "InfiniteOS - 由 ai.net 社区发起的开源 AI 操作系统项目",
+  "description": "InfiniteOS - 由 ai.net实验室发起的开源智算操作系统，面向云边端一体化",
   "type": "module",
   "scripts": {
     "dev": "vite",

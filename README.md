@@ -1,10 +1,10 @@
 # InfiniteOS
 
-**InfiniteOS** 是由 **ai.net 社区**发起的开源 AI 操作系统项目。
+**InfiniteOS** 是由 **ai.net实验室**发起的开源AI操作系统项目，面向云边端一体化场景。
 
 ## InfiniteOS 特性
 
-InfiniteOS 专为边缘计算场景设计，提供：
+InfiniteOS 面向云边端一体化场景，提供：
 
 - 🚀 **算力资源管理** - 完整的 GPU/TPU 等算力资源管理和监控
 - 🖥️ **虚拟化支持** - 虚拟机创建、管理和监控
@@ -19,12 +19,18 @@ InfiniteOS 专为边缘计算场景设计，提供：
 ## 项目结构
 
 ```
-host-manager/
+iosm/
 ├── frontend/          # 前端管理平台
 │   ├── src/
 │   │   ├── views/    # 页面组件
 │   │   ├── components/ # 组件
 │   │   └── router/   # 路由配置
+│   └── package.json
+├── backend/           # 后端API服务
+│   ├── src/
+│   │   ├── routes/   # 路由定义
+│   │   ├── services/ # 业务逻辑
+│   │   └── middleware/ # 中间件
 │   └── package.json
 └── README.md
 ```
@@ -64,4 +70,4 @@ npm run dev
 
 ---
 
-**InfiniteOS** - 让边缘 AI 更简单
+**InfiniteOS** - 让智算更简单

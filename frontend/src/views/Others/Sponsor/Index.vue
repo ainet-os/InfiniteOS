@@ -11,10 +11,10 @@
         <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90 mb-4">关于 InfiniteOS 项目</h2>
         <div class="prose dark:prose-invert max-w-none">
           <p class="text-gray-600 dark:text-gray-400 mb-4">
-            <strong>InfiniteOS</strong> 是由 <strong>ai.net实验室</strong>发起的开源 AI 操作系统项目，旨在为 AI 应用提供完整的操作系统解决方案。
+            <strong>InfiniteOS</strong> 是由 <strong>ai.net实验室</strong>发起的开源智算操作系统，面向云边端一体化场景，旨在为 AI 应用提供完整的操作系统解决方案。
           </p>
           <p class="text-gray-600 dark:text-gray-400">
-            InfiniteOS 专注于边缘算力设备的管理和 AI 模型部署，为边缘 AI 应用提供完整的操作系统支持。
+            InfiniteOS 面向云边端一体化场景，提供完整的算力资源管理、虚拟化、容器化和 AI 模型部署能力，为云边端 AI 应用提供统一的操作系统支持。
           </p>
         </div>
       </div>
