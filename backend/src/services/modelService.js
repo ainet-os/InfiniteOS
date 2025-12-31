@@ -105,9 +105,19 @@ export const getModels = async () => {
           // 忽略错误
         }
 
+        // 读取模型目录下的文件列表（排除info.json）
+        let files = []
+        try {
+          const dirFiles = await fs.readdir(modelPath)
+          files = dirFiles.filter(f => f !== 'info.json' && !f.startsWith('.'))
+        } catch (error) {
+          // 忽略错误
+        }
+
         models.push({
           id: id++,
           ...modelInfo,
+          files: files,
         })
       }
     }

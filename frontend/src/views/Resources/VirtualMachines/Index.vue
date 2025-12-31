@@ -236,7 +236,13 @@
       <!-- 虚拟机列表 -->
       <div class="rounded-lg bg-white dark:bg-white/[0.03] border border-gray-200 dark:border-gray-800 overflow-hidden">
         <div class="p-6">
-          <div v-if="vms.length === 0" class="text-center py-12">
+          <!-- 加载状态 -->
+          <div v-if="loading" class="text-center py-12">
+            <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-brand-500"></div>
+            <p class="mt-4 text-gray-600 dark:text-gray-400">{{ $t('common.loading') }}</p>
+          </div>
+          <!-- 无数据状态 -->
+          <div v-else-if="vms.length === 0" class="text-center py-12">
             <p class="text-gray-600 dark:text-gray-400">{{ $t('common.noVMs') }}</p>
             <button
               @click="showCreateDialog = true"
@@ -245,6 +251,7 @@
               {{ $t('common.createFirstVM') }}
             </button>
           </div>
+          <!-- 有数据状态 -->
           <div v-else class="overflow-x-auto overflow-y-auto max-h-[calc(100vh-300px)]">
             <table class="w-full min-w-[1000px]">
               <thead class="bg-gray-50 dark:bg-white/[0.02]">

@@ -59,6 +59,42 @@ const getContainerCmd = async () => {
 }
 
 /**
+ * 检查镜像是否存在，如果不存在则拉取
+ */
+const ensureImage = async (containerCmd, image) => {
+  try {
+    // 检查镜像是否存在
+    const { stdout } = await execSudo(`${containerCmd} images ${image} --format "{{.Repository}}:{{.Tag}}"`)
+    if (stdout.trim() === image) {
+      console.log(`镜像 ${image} 已存在`)
+      return
+    }
+  } catch (error) {
+    // 镜像不存在，继续拉取
+  }
+
+  // 拉取镜像
+  console.log(`开始拉取镜像: ${image}`)
+  try {
+    const { stdout, stderr, success } = await execSudo(`${containerCmd} pull ${image}`)
+    if (!success) {
+      let errorMsg = stderr || `拉取镜像失败: ${image}`
+      // 检查是否是网络超时错误
+      if (errorMsg.includes('context deadline exceeded') || errorMsg.includes('timeout')) {
+        errorMsg = `拉取镜像超时: ${image}。可能是网络连接问题，请检查网络连接或使用国内镜像源。建议手动执行: ${containerCmd} pull ${image}`
+      } else if (errorMsg.includes('no such host')) {
+        errorMsg = `无法连接到Docker仓库: ${image}。请检查网络连接或DNS配置。`
+      }
+      throw new Error(errorMsg)
+    }
+    console.log(`镜像 ${image} 拉取成功`)
+  } catch (error) {
+    console.error(`拉取镜像失败: ${image}`, error)
+    throw error
+  }
+}
+
+/**
  * 部署模型为推理服务
  */
 export const deployModel = async (deployConfig) => {
@@ -199,6 +235,9 @@ export const deployModel = async (deployConfig) => {
 
   // 添加镜像和命令
   runCmd += ` ${image} ${command.join(' ')}`
+
+  // 确保镜像存在，如果不存在则拉取
+  await ensureImage(containerCmd, image)
 
   // 执行部署
   try {

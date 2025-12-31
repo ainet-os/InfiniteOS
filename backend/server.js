@@ -67,7 +67,7 @@ app.use((err, req, res, next) => {
 const server = http.createServer(app)
 attachVncWsProxy(server)
 
-server.listen(PORT, () => {
+server.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 InfiniteOS Backend Server running on port ${PORT}`)
   console.log(`📡 API endpoints available at http://localhost:${PORT}/api`)
 })

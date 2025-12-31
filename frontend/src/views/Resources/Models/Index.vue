@@ -544,7 +544,13 @@
       <!-- 模型列表 -->
       <div class="rounded-lg bg-white dark:bg-white/[0.03] border border-gray-200 dark:border-gray-800 overflow-hidden">
         <div class="p-6">
-          <div v-if="models.length === 0" class="text-center py-12">
+          <!-- 加载状态 -->
+          <div v-if="loading" class="text-center py-12">
+            <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-brand-500"></div>
+            <p class="mt-4 text-gray-600 dark:text-gray-400">{{ $t('common.loading') }}</p>
+          </div>
+          <!-- 无数据状态 -->
+          <div v-else-if="models.length === 0" class="text-center py-12">
             <p class="text-gray-600 dark:text-gray-400">{{ $t('common.noModels') }}</p>
             <div class="mt-4 flex gap-2 justify-center">
               <button
@@ -567,6 +573,7 @@
               </button>
             </div>
           </div>
+          <!-- 有数据状态 -->
           <table v-else class="w-full">
             <thead class="bg-gray-50 dark:bg-white/[0.02]">
               <tr>
@@ -575,6 +582,7 @@
                 <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-400 uppercase">{{ $t('common.type') }}</th>
                 <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-400 uppercase">{{ $t('common.source') }}</th>
                 <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-400 uppercase">{{ $t('common.size') }}</th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-400 uppercase">文件</th>
                 <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-400 uppercase">{{ $t('common.status') }}</th>
                 <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-400 uppercase">{{ $t('common.actions') }}</th>
               </tr>
@@ -610,6 +618,28 @@
                   </span>
                 </td>
                 <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ model.size }}</td>
+                <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
+                  <div v-if="model.files && model.files.length > 0" class="max-w-xs">
+                    <div class="flex flex-wrap gap-1">
+                      <span
+                        v-for="(file, index) in model.files.slice(0, 3)"
+                        :key="index"
+                        class="px-2 py-0.5 text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded truncate"
+                        :title="file"
+                      >
+                        {{ file }}
+                      </span>
+                      <span
+                        v-if="model.files.length > 3"
+                        class="px-2 py-0.5 text-xs bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 rounded"
+                        :title="model.files.slice(3).join(', ')"
+                      >
+                        +{{ model.files.length - 3 }}
+                      </span>
+                    </div>
+                  </div>
+                  <span v-else class="text-gray-400 dark:text-gray-500">-</span>
+                </td>
                 <td class="px-6 py-4 text-sm">
                   <span
                     :class="[
@@ -734,6 +764,20 @@
               <p class="text-sm text-gray-600 dark:text-gray-400 whitespace-pre-wrap">{{ currentModel.description }}</p>
             </div>
 
+            <!-- 文件列表 -->
+            <div v-if="currentModel.files && currentModel.files.length > 0">
+              <h3 class="text-lg font-medium text-gray-800 dark:text-white/90 mb-4">模型文件</h3>
+              <div class="space-y-2">
+                <div
+                  v-for="(file, index) in currentModel.files"
+                  :key="index"
+                  class="px-3 py-2 bg-gray-50 dark:bg-gray-700/50 rounded-lg text-sm text-gray-700 dark:text-gray-300"
+                >
+                  {{ file }}
+                </div>
+              </div>
+            </div>
+
             <!-- 操作按钮 -->
             <div class="flex justify-end gap-3 pt-4 border-t border-gray-200 dark:border-gray-700">
               <button
@@ -856,9 +900,15 @@ const loadModels = async () => {
   loading.value = true
   try {
     const data = await modelsApi.getModels()
-    models.value = data
+    console.log('获取模型列表成功:', data)
+    models.value = data || []
   } catch (error) {
     console.error('获取模型列表失败:', error)
+    console.error('错误详情:', {
+      message: error?.message,
+      response: error?.response?.data,
+      status: error?.response?.status,
+    })
     models.value = []
   } finally {
     loading.value = false

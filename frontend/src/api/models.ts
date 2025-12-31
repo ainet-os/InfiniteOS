@@ -9,6 +9,7 @@ export interface Model {
   size: string
   status: 'ready' | 'syncing' | 'error'
   description?: string
+  files?: string[]
 }
 
 export interface ModelConfig {
