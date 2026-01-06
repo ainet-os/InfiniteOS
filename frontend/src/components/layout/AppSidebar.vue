@@ -583,6 +583,7 @@ import {
   SupportIcon,
   HeartIcon,
   PodIcon,
+  TerminalIcon,
 } from '../../icons'
 import SidebarWidget from './SidebarWidget.vue'
 import { useSidebar } from '@/composables/useSidebar'
@@ -665,6 +666,11 @@ const systemItems = computed<MenuItem[]>(() => [
     icon: PlugInIcon,
     name: t('menu.services'),
     path: '/services',
+  },
+  {
+    icon: TerminalIcon,
+    name: t('menu.terminal'),
+    path: '/terminal',
   },
   {
     icon: ListIcon,

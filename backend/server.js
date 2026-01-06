@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 import http from 'http'
 import { attachVncWsProxy } from './src/ws/vncProxy.js'
+import { attachTerminalWsProxy } from './src/ws/terminalProxy.js'
 
 // Load environment variables
 dotenv.config()
@@ -66,6 +67,7 @@ app.use((err, req, res, next) => {
 // Start server (HTTP + WebSocket upgrade)
 const server = http.createServer(app)
 attachVncWsProxy(server)
+attachTerminalWsProxy(server)
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 InfiniteOS Backend Server running on port ${PORT}`)

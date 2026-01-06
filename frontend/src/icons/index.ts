@@ -58,6 +58,7 @@ import NetworkIcon from './NetworkIcon.vue'
 import StorageIcon from './StorageIcon.vue'
 import HeartIcon from './HeartIcon.vue'
 import PodIcon from './PodIcon.vue'
+import TerminalIcon from './TerminalIcon.vue'
 // DeploymentIcon, ServiceIcon, ConfigIcon 已移除 - 这些是集群级别的资源管理功能
 
 export {
@@ -121,5 +122,6 @@ export {
   StorageIcon,
   HeartIcon,
   PodIcon,
+  TerminalIcon,
   // DeploymentIcon, ServiceIcon, ConfigIcon 已移除 - 这些是集群级别的资源管理功能
 }

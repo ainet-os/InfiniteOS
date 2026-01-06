@@ -151,6 +151,15 @@ const router = createRouter({
       },
     },
     {
+      path: '/terminal',
+      name: 'Terminal',
+      component: () => import('../views/System/Terminal/Index.vue'),
+      meta: {
+        title: '终端',
+        requiresAuth: true,
+      },
+    },
+    {
       path: '/logs',
       name: 'Logs',
       component: () => import('../views/System/Logs/Index.vue'),
@@ -217,6 +226,7 @@ router.beforeEach((to, from, next) => {
     '/network': 'pages.network.title',
     '/storage': 'pages.storage.title',
     '/services': 'pages.services.title',
+    '/terminal': 'pages.terminal.title',
     '/logs': 'pages.logs.title',
     '/users': 'pages.users.title',
     '/docs': 'menu.docs',

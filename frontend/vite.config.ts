@@ -57,12 +57,49 @@ export default defineConfig({
           });
         },
       },
-      // 后端API代理
+      // WebSocket终端代理 - 需要放在 /api 之前，因为更具体
+      '/api/terminal/ws': {
+        target: 'http://localhost:3000',
+        changeOrigin: false, // WebSocket不需要changeOrigin
+        secure: false,
+        ws: true,
+        rewrite: (path) => path,
+        configure: (proxy, _options) => {
+          proxy.on('error', (err, _req, _res) => {
+            console.error('Terminal WebSocket proxy error:', err);
+          });
+          proxy.on('proxyReqWs', (proxyReq, req, socket) => {
+            console.log('Terminal WebSocket proxy request:', req.url);
+            // 确保WebSocket升级请求的头部正确
+            proxyReq.setHeader('Connection', 'Upgrade');
+            proxyReq.setHeader('Upgrade', 'websocket');
+          });
+          proxy.on('open', (proxySocket) => {
+            console.log('Terminal WebSocket connection opened');
+          });
+          proxy.on('close', (res, socket, head) => {
+            console.log('Terminal WebSocket connection closed');
+          });
+          proxy.on('upgrade', (req, socket, head) => {
+            console.log('Terminal WebSocket upgrade request:', req.url);
+          });
+        },
+      },
+      // 后端API代理（包括其他WebSocket）
       '/api': {
-        target: 'http://0.0.0.0:3000',
+        target: 'http://localhost:3000',
         changeOrigin: true,
         secure: false,
         rewrite: (path) => path,
+        ws: true, // 启用WebSocket代理
+        configure: (proxy, _options) => {
+          proxy.on('error', (err, _req, _res) => {
+            console.log('API proxy error:', err);
+          });
+          proxy.on('proxyReqWs', (proxyReq, req, socket) => {
+            console.log('WebSocket proxy request:', req.url);
+          });
+        },
       },
     },
   },
