@@ -40,11 +40,34 @@ api.interceptors.response.use(
     return response.data
   },
   (error) => {
-    console.error('API请求失败:', {
+    // 详细记录错误信息
+    const errorInfo = {
       url: error.config?.url,
+      method: error.config?.method,
+      baseURL: error.config?.baseURL,
       status: error.response?.status,
-      message: error.response?.data?.error || error.message,
-    })
+      statusText: error.response?.statusText,
+      message: error.message,
+      code: error.code,
+      responseData: error.response?.data,
+    }
+    console.error('API请求失败:', errorInfo)
+    
+    // 处理网络错误（Network Error）
+    if (error.code === 'ECONNABORTED' || error.message === 'Network Error' || !error.response) {
+      console.error('网络连接错误:', {
+        code: error.code,
+        message: error.message,
+        baseURL: error.config?.baseURL,
+        url: error.config?.url,
+      })
+      // 返回更友好的错误信息
+      return Promise.reject({
+        error: '网络连接失败，请检查服务器是否运行',
+        details: error.message,
+        code: error.code,
+      })
+    }
     
     // 处理401和403认证错误
     if (error.response?.status === 401 || error.response?.status === 403) {

@@ -195,3 +195,5 @@ echo "访问地址："
 echo "  后端API: http://$TARGET_HOST:3000/api"
 echo "  前端界面: http://$TARGET_HOST:8080"
 
+
+
