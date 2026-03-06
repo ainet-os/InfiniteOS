@@ -682,6 +682,11 @@ const systemItems = computed<MenuItem[]>(() => [
     name: t('menu.users'),
     path: '/users',
   },
+  {
+    icon: SettingsIcon,
+    name: t('menu.settings'),
+    path: '/settings',
+  },
 ])
 
 // 支持 section

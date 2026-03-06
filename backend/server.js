@@ -35,6 +35,7 @@ import logRoutes from './src/routes/logs.js'
 import userRoutes from './src/routes/users.js'
 import k8sRoutes from './src/routes/k8s.js'
 import alertRoutes from './src/routes/alerts.js'
+import settingsRoutes from './src/routes/settings.js'
 
 // Routes
 app.use('/api/auth', authRoutes)
@@ -50,6 +51,7 @@ app.use('/api/logs', logRoutes)
 app.use('/api/users', userRoutes)
 app.use('/api/k8s', k8sRoutes)
 app.use('/api/alerts', alertRoutes)
+app.use('/api/settings', settingsRoutes)
 
 // Health check
 app.get('/api/health', (req, res) => {

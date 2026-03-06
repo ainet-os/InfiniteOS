@@ -47,6 +47,7 @@ temp/
 # Backend specific
 backend/.env
 backend/config/*.json
+backend/data/
 backend/logs/
 backend/tmp/
 

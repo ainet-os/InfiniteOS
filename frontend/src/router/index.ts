@@ -177,6 +177,15 @@ const router = createRouter({
         requiresAuth: true,
       },
     },
+    {
+      path: '/settings',
+      name: 'Settings',
+      component: () => import('../views/System/Settings/Index.vue'),
+      meta: {
+        title: '设置',
+        requiresAuth: true,
+      },
+    },
     // 支持路由（不需要认证）
     {
       path: '/docs',
@@ -229,6 +238,7 @@ router.beforeEach((to, from, next) => {
     '/terminal': 'pages.terminal.title',
     '/logs': 'pages.logs.title',
     '/users': 'pages.users.title',
+    '/settings': 'pages.settings.title',
     '/docs': 'menu.docs',
     '/help': 'menu.help',
     '/sponsor': 'menu.sponsor',
