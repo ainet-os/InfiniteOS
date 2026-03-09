@@ -231,8 +231,18 @@ async function doJoinNetwork() {
   networkMessage.value = ''
   networkError.value = ''
   networkLogs.value = []
+  const { address, username, password } = infiniteUnoForm.value
+  if (!address?.trim() || !username?.trim() || !password) {
+    networkError.value = '请配置 InfiniteUno 地址、租户管理员邮箱与密码'
+    return
+  }
   infiniteUnoLoading.value = true
   try {
+    await settingsApi.updateInfiniteUno({
+      address: address.trim(),
+      username: username.trim(),
+      password,
+    })
     const res = await settingsApi.joinNetworkInfiniteUno()
     infiniteUnoStatus.value = res
     networkMessage.value = (res as { message?: string }).message || ''

@@ -72,7 +72,7 @@
                     type="text"
                     required
                     class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white/90 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
-                    placeholder="例如: 100.93.0.8:32000"
+                    placeholder="例如: https://100.93.0.38:9000"
                   />
                   <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
                     云端仓库API服务端点（IP:端口）
@@ -87,7 +87,7 @@
                     v-model="configForm.webConsole"
                     type="text"
                     class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white/90 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
-                    placeholder="例如: 100.93.0.8:32081"
+                    placeholder="例如: https://100.93.0.38:9001"
                   />
                   <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
                     云端仓库Web控制台地址（可选，用于访问Web界面）
@@ -131,7 +131,7 @@
                     type="text"
                     required
                     class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white/90 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
-                    placeholder="例如: models"
+                    placeholder="例如: pubmodels"
                   />
                   <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
                     云端仓库存储桶名称，模型文件将存储在此桶中
@@ -541,152 +541,102 @@
         </div>
       </div>
 
-      <!-- 模型列表 -->
-      <div class="rounded-lg bg-white dark:bg-white/[0.03] border border-gray-200 dark:border-gray-800 overflow-hidden">
-        <div class="p-6">
-          <!-- 加载状态 -->
-          <div v-if="loading" class="text-center py-12">
-            <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-brand-500"></div>
-            <p class="mt-4 text-gray-600 dark:text-gray-400">{{ $t('common.loading') }}</p>
+      <!-- 本地模型 / 云端模型 双列表（分块加载，先出本地再出云端） -->
+      <div class="space-y-6">
+        <!-- 本地模型（/var/data/pubmodels 下目录名为模型名） -->
+        <div class="rounded-lg bg-white dark:bg-white/[0.03] border border-gray-200 dark:border-gray-800 overflow-hidden">
+          <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+            <h2 class="text-lg font-medium text-gray-800 dark:text-white/90">本地模型</h2>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-0.5">目录 /var/data/pubmodels 下每个子目录对应一个模型，目录名为模型名称</p>
           </div>
-          <!-- 无数据状态 -->
-          <div v-else-if="models.length === 0" class="text-center py-12">
-            <p class="text-gray-600 dark:text-gray-400">{{ $t('common.noModels') }}</p>
-            <div class="mt-4 flex gap-2 justify-center">
-              <button
-                @click="showConfigDialog = true"
-                class="px-4 py-2 bg-gray-500 dark:bg-gray-600 text-white rounded-lg hover:bg-gray-600 dark:hover:bg-gray-700 transition-colors"
-              >
-                {{ $t('common.configRepository') }}
-              </button>
-              <button
-                @click="handleSync"
-                class="px-4 py-2 bg-success-600 dark:bg-success-500 text-white rounded-lg hover:bg-success-700 dark:hover:bg-success-600 transition-colors"
-              >
-                {{ $t('common.syncModels') }}
-              </button>
-              <button
-                @click="showUploadDialog = true"
-                class="px-4 py-2 bg-brand-500 dark:bg-brand-500 text-white rounded-lg hover:bg-brand-600 dark:hover:bg-brand-600 transition-colors"
-              >
-                {{ $t('common.uploadModel') }}
-              </button>
+          <div class="p-6">
+            <div v-if="localLoading" class="text-center py-8">
+              <div class="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-brand-500"></div>
+              <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">加载中...</p>
+            </div>
+            <div v-else-if="localModels.length === 0" class="text-center py-8 text-gray-500 dark:text-gray-400 text-sm">暂无本地模型</div>
+            <div v-else class="overflow-x-auto">
+                <table class="w-full">
+                  <thead class="bg-gray-50 dark:bg-white/[0.02]">
+                    <tr>
+                      <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-400 uppercase">模型名称</th>
+                      <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-400 uppercase">大小</th>
+                      <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-400 uppercase">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-gray-200 dark:divide-gray-800">
+                    <tr v-for="m in localModels" :key="'local-' + m.name" class="hover:bg-gray-50 dark:hover:bg-white/[0.02]">
+                      <td class="px-6 py-4">
+                        <router-link
+                          :to="{ name: 'ModelDetail', params: { source: 'local', name: m.name } }"
+                          class="text-brand-500 dark:text-brand-400 hover:underline font-medium"
+                        >
+                          {{ m.name }}
+                        </router-link>
+                      </td>
+                      <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ m.size }}</td>
+                      <td class="px-6 py-4">
+                        <button
+                          @click="handleDeleteLocal(m.name)"
+                          class="px-2.5 py-1.5 text-xs bg-error-600 dark:bg-error-500 text-white rounded hover:bg-error-700 dark:hover:bg-error-600 transition-colors"
+                        >
+                          {{ $t('common.delete') }}
+                        </button>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
-          <!-- 有数据状态 -->
-          <div v-else class="overflow-x-auto">
-            <table class="w-full min-w-[1000px]">
-              <thead class="bg-gray-50 dark:bg-white/[0.02]">
-                <tr>
-                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-400 uppercase whitespace-nowrap">{{ $t('common.modelName') }}</th>
-                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-400 uppercase whitespace-nowrap">{{ $t('common.version') }}</th>
-                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-400 uppercase whitespace-nowrap">{{ $t('common.type') }}</th>
-                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-400 uppercase whitespace-nowrap">{{ $t('common.source') }}</th>
-                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-400 uppercase whitespace-nowrap">{{ $t('common.size') }}</th>
-                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-400 uppercase whitespace-nowrap">文件</th>
-                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-400 uppercase whitespace-nowrap">{{ $t('common.status') }}</th>
-                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-400 uppercase whitespace-nowrap">{{ $t('common.actions') }}</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-gray-200 dark:divide-gray-800">
-                <tr v-for="model in models" :key="model.id" class="hover:bg-gray-50 dark:hover:bg-white/[0.02]">
-                  <td class="px-6 py-4">
-                    <div class="max-w-xs">
-                      <div class="text-sm font-medium text-gray-800 dark:text-white/90 break-words">{{ model.name }}</div>
-                      <div v-if="model.description" class="text-xs text-gray-500 dark:text-gray-500 mt-1 break-words">
-                        {{ model.description }}
-                      </div>
-                    </div>
-                  </td>
-                  <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">{{ model.version || '-' }}</td>
-                  <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">
-                    <span class="px-2 py-1 text-xs rounded bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300">
-                      {{ getTypeLabel(model.type) }}
-                    </span>
-                  </td>
-                  <td class="px-6 py-4 text-sm whitespace-nowrap">
-                    <span
-                      :class="[
-                        'px-2 py-1 text-xs rounded',
-                        model.source === 'cloud'
-                          ? 'bg-blue-500/10 text-blue-500'
-                          : 'bg-green-500/10 text-green-500',
-                      ]"
-                    >
-                      {{ model.source === 'cloud' ? $t('common.cloudSync') : $t('common.localUpload') }}
-                    </span>
-                  </td>
-                  <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">{{ model.size }}</td>
-                  <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
-                    <div v-if="model.files && model.files.length > 0" class="max-w-xs">
-                      <div class="flex flex-wrap gap-1">
-                        <span
-                          v-for="(file, index) in model.files.slice(0, 3)"
-                          :key="index"
-                          class="px-2 py-0.5 text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded break-words"
-                          :title="file"
-                        >
-                          {{ file }}
-                        </span>
-                        <span
-                          v-if="model.files.length > 3"
-                          class="px-2 py-0.5 text-xs bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 rounded"
-                          :title="model.files.slice(3).join(', ')"
-                        >
-                          +{{ model.files.length - 3 }}
-                        </span>
-                      </div>
-                    </div>
-                    <span v-else class="text-gray-400 dark:text-gray-500">-</span>
-                  </td>
-                  <td class="px-6 py-4 text-sm whitespace-nowrap">
-                    <span
-                      :class="[
-                        'px-2 py-1 text-xs rounded',
-                        model.status === 'ready'
-                          ? 'bg-success-500/10 text-success-500'
-                          : model.status === 'syncing'
-                          ? 'bg-warning-500/10 text-warning-500'
-                          : 'bg-gray-500/10 text-gray-500',
-                      ]"
-                    >
-                      {{ getStatusLabel(model.status) }}
-                    </span>
-                  </td>
-                  <td class="px-6 py-4 text-sm whitespace-nowrap">
-                    <div class="flex gap-2">
-                      <button
-                        @click="viewModel(model.id)"
-                        class="px-2.5 py-1.5 text-xs bg-brand-500 dark:bg-brand-500 text-white rounded hover:bg-brand-600 dark:hover:bg-brand-600 transition-colors"
-                      >
-                        {{ $t('common.view') }}
-                      </button>
-                      <button
-                        @click="showEditDialog(model)"
-                        class="px-2.5 py-1.5 text-xs bg-gray-500 dark:bg-gray-600 text-white rounded hover:bg-gray-600 dark:hover:bg-gray-700 transition-colors"
-                      >
-                        {{ $t('common.edit') }}
-                      </button>
-                      <button
-                        v-if="model.status === 'ready'"
-                        @click="showDeployDialog(model)"
-                        class="px-2.5 py-1.5 text-xs bg-success-600 dark:bg-success-500 text-white rounded hover:bg-success-700 dark:hover:bg-success-600 transition-colors"
-                      >
-                        {{ $t('common.deploy') }}
-                      </button>
-                      <button
-                        @click="deleteModel(model.id)"
-                        class="px-2.5 py-1.5 text-xs bg-error-600 dark:bg-error-500 text-white rounded hover:bg-error-700 dark:hover:bg-error-600 transition-colors"
-                      >
-                        {{ $t('common.delete') }}
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+
+        <!-- 云端模型（存储桶中按前缀，每个顶层前缀为模型名） -->
+        <div class="rounded-lg bg-white dark:bg-white/[0.03] border border-gray-200 dark:border-gray-800 overflow-hidden">
+          <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+            <h2 class="text-lg font-medium text-gray-800 dark:text-white/90">云端模型</h2>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-0.5">所配置存储桶中的模型，按目录（前缀）划分，目录名为模型名称</p>
           </div>
-        </div>
+          <div class="p-6">
+            <div v-if="cloudLoading" class="text-center py-8">
+              <div class="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-brand-500"></div>
+              <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">加载中...</p>
+            </div>
+            <div v-else-if="cloudModels.length === 0" class="text-center py-8 text-gray-500 dark:text-gray-400 text-sm">暂无云端模型，请先保存仓库配置后刷新</div>
+            <div v-else class="overflow-x-auto">
+                <table class="w-full">
+                  <thead class="bg-gray-50 dark:bg-white/[0.02]">
+                    <tr>
+                      <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-400 uppercase">模型名称</th>
+                      <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-400 uppercase">大小</th>
+                      <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-400 uppercase">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-gray-200 dark:divide-gray-800">
+                    <tr v-for="m in cloudModels" :key="'cloud-' + m.name" class="hover:bg-gray-50 dark:hover:bg-white/[0.02]">
+                      <td class="px-6 py-4">
+                        <router-link
+                          :to="{ name: 'ModelDetail', params: { source: 'cloud', name: m.name } }"
+                          class="text-brand-500 dark:text-brand-400 hover:underline font-medium"
+                        >
+                          {{ m.name }}
+                        </router-link>
+                      </td>
+                      <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ m.size }}</td>
+                      <td class="px-6 py-4">
+                        <button
+                          @click="handleSyncOne(m.name)"
+                          :disabled="syncingOne === m.name"
+                          class="px-2.5 py-1.5 text-xs bg-success-600 dark:bg-success-500 text-white rounded hover:bg-success-700 dark:hover:bg-success-600 disabled:opacity-50 transition-colors"
+                        >
+                          {{ syncingOne === m.name ? '同步中...' : '同步' }}
+                        </button>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
       </div>
 
       <!-- 编辑模型对话框 -->
@@ -915,7 +865,7 @@ import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AdminLayout from '@/components/layout/AdminLayout.vue'
 import { modelsApi } from '@/api/models'
-import type { Model } from '@/api/models'
+import type { Model, ModelListItem } from '@/api/models'
 
 const { t: $t } = useI18n()
 const loading = ref(false)
@@ -1002,23 +952,74 @@ const handleDeploy = async () => {
   }
 }
 
-// 加载模型列表
+// 本地模型列表、云端模型列表（分开加载，先展示本地再展示云端，减少首屏等待）
+const localModels = ref<ModelListItem[]>([])
+const cloudModels = ref<ModelListItem[]>([])
+const localLoading = ref(true)
+const cloudLoading = ref(true)
+
+const loadLocalModels = async () => {
+  try {
+    const data = await modelsApi.getLocalModels()
+    localModels.value = data || []
+  } catch (error) {
+    console.error('获取本地模型列表失败:', error)
+    localModels.value = []
+  } finally {
+    localLoading.value = false
+  }
+}
+
+const loadCloudModels = async () => {
+  try {
+    const data = await modelsApi.getCloudModels()
+    cloudModels.value = data || []
+  } catch (error) {
+    console.error('获取云端模型列表失败:', error)
+    cloudModels.value = []
+  } finally {
+    cloudLoading.value = false
+  }
+}
+
 const loadModels = async () => {
   loading.value = true
+  localLoading.value = true
+  cloudLoading.value = true
   try {
-    const data = await modelsApi.getModels()
-    console.log('获取模型列表成功:', data)
-    models.value = data || []
-  } catch (error) {
-    console.error('获取模型列表失败:', error)
-    console.error('错误详情:', {
-      message: error?.message,
-      response: error?.response?.data,
-      status: error?.response?.status,
-    })
-    models.value = []
-  } finally {
+    await loadLocalModels()
     loading.value = false
+    loadCloudModels()
+  } catch (_) {
+    loading.value = false
+    cloudLoading.value = false
+  }
+}
+
+// 同步单个云端模型到本地
+const syncingOne = ref<string | null>(null)
+const handleSyncOne = async (name: string) => {
+  syncingOne.value = name
+  try {
+    await modelsApi.syncModelByName(name)
+    alert('同步成功')
+    await loadLocalModels()
+  } catch (error: any) {
+    alert(error?.response?.data?.error || error?.message || '同步失败')
+  } finally {
+    syncingOne.value = null
+  }
+}
+
+// 删除本地模型
+const handleDeleteLocal = async (name: string) => {
+  if (!confirm(`确定删除本地模型「${name}」？此操作不可恢复。`)) return
+  try {
+    await modelsApi.deleteLocalModel(name)
+    alert('删除成功')
+    await loadLocalModels()
+  } catch (error: any) {
+    alert(error?.response?.data?.error || error?.message || '删除失败')
   }
 }
 
@@ -1026,12 +1027,12 @@ const loadModels = async () => {
 const showConfigDialog = ref(false)
 
 const configForm = ref({
-  apiEndpoint: '100.93.0.8:32000',
-  webConsole: '100.93.0.8:32081',
-  accessKey: 'infiniteos',
-  secretKey: 'infiniteos',
-  bucket: 'models',
-  useSSL: false,
+  apiEndpoint: 'https://100.93.0.38:9000',
+  webConsole: 'https://100.93.0.38:9001',
+  accessKey: '',
+  secretKey: '',
+  bucket: 'pubmodels',
+  useSSL: true,
   syncInterval: 'manual',
   autoSync: true,
 })
@@ -1053,23 +1054,7 @@ const handleSaveConfig = async () => {
     await modelsApi.updateModelConfig(configForm.value)
     alert('配置已保存！')
     showConfigDialog.value = false
-    
-    // 如果开启了自动同步，则自动同步模型
-    if (configForm.value.autoSync) {
-      syncing.value = true
-      try {
-        const result = await modelsApi.syncModels()
-        alert(`配置已保存并同步完成！已同步 ${result.synced} 个模型`)
-        await loadModels()
-      } catch (error: any) {
-        console.error('自动同步失败:', error)
-        // 显示同步错误，但配置已保存成功
-        const errorMsg = typeof error === 'string' ? error : (error?.error || error?.message || '同步失败')
-        alert(`配置已保存，但同步失败: ${errorMsg}`)
-      } finally {
-        syncing.value = false
-      }
-    }
+    await loadModels()
   } catch (error: any) {
     console.error('保存配置失败:', error)
     // 处理不同类型的错误

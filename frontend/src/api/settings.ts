@@ -30,7 +30,9 @@ export const settingsApi = {
     return api.post<InfiniteUnoStatus & { message: string }>('/settings/infiniteuno/register')
   },
   joinNetworkInfiniteUno() {
-    return api.post<InfiniteUnoStatus & { message: string }>('/settings/infiniteuno/network')
+    return api.post<InfiniteUnoStatus & { message: string }>('/settings/infiniteuno/network', {}, {
+      timeout: 120000,
+    })
   },
   leaveNetworkInfiniteUno() {
     return api.post<InfiniteUnoStatus & { message: string }>('/settings/infiniteuno/network/leave')

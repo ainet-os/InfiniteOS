@@ -21,7 +21,7 @@ export default defineConfig({
   },
   server: {
     host: '0.0.0.0',
-    port: 8080,
+    port: parseInt(process.env.VITE_DEV_PORT || '8080', 10),
     strictPort: false,
     open: false,
     cors: true,
@@ -59,7 +59,7 @@ export default defineConfig({
       },
       // WebSocket终端代理 - 需要放在 /api 之前，因为更具体
       '/api/terminal/ws': {
-        target: 'http://localhost:3000',
+        target: process.env.VITE_DEV_BACKEND_URL || 'http://localhost:3000',
         changeOrigin: false, // WebSocket不需要changeOrigin
         secure: false,
         ws: true,
@@ -87,7 +87,7 @@ export default defineConfig({
       },
       // 后端API代理（包括其他WebSocket）
       '/api': {
-        target: 'http://localhost:3000',
+        target: process.env.VITE_DEV_BACKEND_URL || 'http://localhost:3000',
         changeOrigin: true,
         secure: false,
         rewrite: (path) => path,

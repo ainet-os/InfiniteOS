@@ -53,7 +53,7 @@ api.interceptors.response.use(
     }
     console.error('API请求失败:', errorInfo)
     
-    // 处理网络错误（Network Error）
+    // 处理网络错误（Network Error）与超时
     if (error.code === 'ECONNABORTED' || error.message === 'Network Error' || !error.response) {
       console.error('网络连接错误:', {
         code: error.code,
@@ -61,9 +61,11 @@ api.interceptors.response.use(
         baseURL: error.config?.baseURL,
         url: error.config?.url,
       })
-      // 返回更友好的错误信息
+      const isTimeout = error.code === 'ECONNABORTED'
       return Promise.reject({
-        error: '网络连接失败，请检查服务器是否运行',
+        error: isTimeout
+          ? '请求超时，组网等操作可能耗时较长，请稍后重试'
+          : '网络连接失败，请检查服务器是否运行',
         details: error.message,
         code: error.code,
       })

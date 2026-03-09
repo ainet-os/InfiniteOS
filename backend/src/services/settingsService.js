@@ -65,19 +65,21 @@ export async function setConfig(updates) {
 
 /** Tailscale 证书目录（需 root 写入） */
 const TAILSCALE_CA_PATH = '/etc/tailscale/ca.crt'
+/** 组网 CA 证书写入系统信任目录，update-ca-certificates 后生效 */
+const CA_CERTIFICATES_PATH = '/usr/local/share/ca-certificates/ainet-ca.crt'
 
 /**
  * 解析 tailscale status --json 输出，判断是否已入网
+ * 登出时 BackendState=NeedsLogin、Self.Online=false、TailscaleIPs=null，仅当已登录且有 IP 才视为在线
  */
 function parseTailscaleStatusJson(stdout) {
   if (!stdout || !stdout.trim()) return false
   try {
     const data = JSON.parse(stdout)
+    if (data.BackendState === 'NeedsLogin' || data.BackendState === 'Stopped') return false
+    if (data.Self && data.Self.Online === false) return false
     if (data.Self && data.Self.Online === true) return true
-    if (data.BackendState === 'Running' && data.Self) return true
     if (typeof data.Self === 'object' && data.Self.TailscaleIPs && data.Self.TailscaleIPs.length > 0) return true
-    if (data.Status && (data.Status === 'Running' || data.Status === 'Started')) return true
-    if (data.Self && (data.Self.HostName || data.Self.DNSName)) return true
     return false
   } catch (e) {
     return false
@@ -86,12 +88,13 @@ function parseTailscaleStatusJson(stdout) {
 
 /**
  * 解析 tailscale status 纯文本输出，判断是否已入网
- * 表格格式为多行，每行含 100.x.x.x（Tailscale 网段）
+ * 登出时仅输出 "Logged out."，须先排除再判断
  */
 function parseTailscaleStatusText(stdout) {
   if (!stdout || !stdout.trim()) return false
   const s = stdout.toLowerCase()
-  if (s.includes('connected') || s.includes('logged in') || s.includes('running')) return true
+  if (s.includes('logged out') || s.includes('needs login')) return false
+  if (s.includes('connected') || s.includes('logged in')) return true
   if (s.includes('100.') && (s.includes('tx') || s.includes('rx') || s.includes('#') || s.includes('linux') || s.includes('user-'))) return true
   if (/100\.\d+\.\d+\.\d+/.test(stdout)) return true
   return false
@@ -108,9 +111,7 @@ async function isTailscaleOnline() {
   const tryJson = async (execFn, cmd) => {
     const { stdout } = await execFn(`${cmd} status --json 2>/dev/null || true`)
     if (!stdout || !stdout.trim()) return false
-    if (parseTailscaleStatusJson(stdout)) return true
-    if (stdout.includes('BackendState') && stdout.includes('Running') && stdout.includes('TailscaleIPs')) return true
-    return false
+    return parseTailscaleStatusJson(stdout)
   }
   const tryText = async (execFn, cmd) => {
     const { stdout, success } = await execFn(`${cmd} status 2>/dev/null || true`)
@@ -143,12 +144,35 @@ async function infiniteUnoNetworkJoin(baseUrl, email, password) {
     const text = await res.text()
     throw new Error(`组网 API 请求失败: ${res.status} ${text}`)
   }
-  const data = await res.json()
-  const loginServer = data.login_server || data.headscale_url || data.server_url || data.url
-  const caCert = data.ca_cert || data.ca_crt || data.certificate || data.crt
-  const authKey = data.auth_key || data.authKey
+  const raw = await res.json()
+  const data = raw?.data ?? raw?.result ?? raw
+  if (!data || typeof data !== 'object') {
+    throw new Error(`组网 API 返回格式异常: 非对象 (keys: ${raw && typeof raw === 'object' ? Object.keys(raw).join(', ') : 'unknown'})`)
+  }
+  const loginServer =
+    data.login_server ??
+    data.loginServer ??
+    data.headscale_url ??
+    data.headscaleUrl ??
+    data.server_url ??
+    data.serverUrl ??
+    data.server ??
+    data.url
+  let caCert =
+    data.ca_cert ?? data.ca_crt ?? data.certificate ?? data.crt ?? data.caCert ?? data.caCertificate
+  if (data.certBase64 && typeof data.certBase64 === 'string') {
+    try {
+      caCert = Buffer.from(data.certBase64, 'base64').toString('utf8')
+    } catch (_) {
+      caCert = caCert || ''
+    }
+  }
+  const authKey =
+    data.auth_key ?? data.authKey ?? data.pre_auth_key ?? data.preAuthKey ?? data.key
   if (!loginServer || !authKey) {
-    throw new Error('组网 API 返回缺少 login_server 或 auth_key')
+    throw new Error(
+      `组网 API 返回缺少 login_server 或 auth_key。当前返回字段: ${Object.keys(data).join(', ')}。若为其他命名请反馈。`
+    )
   }
   return { loginServer, caCert: caCert || '', authKey }
 }
@@ -195,14 +219,18 @@ export async function performJoinNetwork() {
   if (!authKeyToUse) throw new Error('未获取到 auth_key，请检查 InfiniteUno 配置或 API')
 
   if (caCert) {
-    logs.push('[3/5] 写入 CA 证书并更新...')
+    logs.push('[3/5] 将 CA 证书解码为 ainet-ca.crt 并写入 /usr/local/share/ca-certificates/...')
     const { writeFile: wf } = await import('fs/promises')
-    const tmpPath = join(CONFIG_DIR, 'tailscale-ca.crt.tmp')
+    const tmpPath = join(CONFIG_DIR, 'ainet-ca.crt.tmp')
     await wf(tmpPath, caCert, 'utf8')
-    const { success: mkOk, stderr: mkErr } = await execSudo(`mkdir -p /etc/tailscale`)
-    const { success: cpOk, stderr: cpErr } = await execSudo(`cp ${tmpPath} ${TAILSCALE_CA_PATH} && chmod 644 ${TAILSCALE_CA_PATH}`)
-    if (!cpOk) logs.push(`[3/5] 写入 CA 证书: stderr=${cpErr}`)
-    else logs.push('[3/5] CA 证书已写入 /etc/tailscale/ca.crt')
+    const { success: mkOk, stderr: mkErr } = await execSudo(`mkdir -p /usr/local/share/ca-certificates`)
+    if (!mkOk) logs.push(`[3/5] 创建目录失败: ${mkErr}`)
+    const { success: cpOk, stderr: cpErr } = await execSudo(`cp "${tmpPath}" ${CA_CERTIFICATES_PATH} && chmod 644 ${CA_CERTIFICATES_PATH}`)
+    if (!cpOk) logs.push(`[3/5] 写入 CA 证书失败: ${cpErr}`)
+    else logs.push('[3/5] ainet-ca.crt 已写入 /usr/local/share/ca-certificates/')
+    const { success: updateOk, stderr: updateErr } = await execSudo('update-ca-certificates 2>/dev/null || true')
+    if (updateOk) logs.push('[3/5] update-ca-certificates 已执行，证书已生效')
+    else if (updateErr) logs.push(`[3/5] update-ca-certificates: ${updateErr}`)
   } else {
     logs.push('[3/5] 未返回 CA 证书，跳过证书写入。')
   }
@@ -210,16 +238,16 @@ export async function performJoinNetwork() {
   logs.push('[4/5] 重启 tailscaled 服务...')
   let restartOk = false
   try {
-    const r = await execSudo('systemctl restart tailscaled 2>/dev/null || true')
+    const r = await execSudo('systemctl restart tailscaled.service 2>/dev/null || true')
     restartOk = r.success
-    logs.push(r.success ? '[4/5] systemctl restart tailscaled 已执行' : `[4/5] systemctl: ${r.stderr || '未成功'}`)
+    logs.push(r.success ? '[4/5] systemctl restart tailscaled.service 已执行' : `[4/5] systemctl: ${r.stderr || '未成功'}`)
   } catch (e) {
     logs.push(`[4/5] systemctl 异常: ${e.message}`)
   }
   if (!restartOk) {
     try {
-      const r2 = await execSudo('service tailscaled restart 2>/dev/null || true')
-      logs.push(r2.success ? '[4/5] service tailscaled restart 已执行' : '[4/5] service 未成功')
+      const r2 = await execSudo('systemctl restart tailscaled 2>/dev/null || service tailscaled restart 2>/dev/null || true')
+      logs.push(r2.success ? '[4/5] tailscaled 已重启' : '[4/5] 重启未成功')
     } catch (e2) {
       logs.push(`[4/5] service 异常: ${e2.message}`)
     }
@@ -228,8 +256,7 @@ export async function performJoinNetwork() {
   logs.push('[4/5] 等待 2s 完成。')
 
   logs.push('[5/5] 执行 tailscale up 入网...')
-  const envExtra = caCert ? `TS_EXTRA_CA_CERTS=${TAILSCALE_CA_PATH} ` : ''
-  const upCmd = `${envExtra}tailscale up --login-server=${loginServer} --authkey=${authKeyToUse} --accept-dns=false`
+  const upCmd = `tailscale up --login-server=${loginServer} --authkey=${authKeyToUse} --accept-dns=false --accept-routes=false`
   const { success, stdout, stderr } = await execSudo(upCmd)
   if (stdout) logs.push(`[5/5] stdout: ${stdout}`)
   if (stderr) logs.push(`[5/5] stderr: ${stderr}`)

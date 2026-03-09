@@ -104,6 +104,15 @@ const router = createRouter({
       },
     },
     {
+      path: '/models/detail/:source/:name',
+      name: 'ModelDetail',
+      component: () => import('../views/Resources/Models/Detail.vue'),
+      meta: {
+        title: '模型详情',
+        requiresAuth: true,
+      },
+    },
+    {
       path: '/models',
       name: 'Models',
       component: () => import('../views/Resources/Models/Index.vue'),

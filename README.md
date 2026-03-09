@@ -47,6 +47,8 @@ npm run dev
 
 访问 http://localhost:8080
 
+**端口说明**：生产环境默认前端 8080、后端 3000。测试环境若需使用其他端口（如前端 8090、后端 3001），可在 `frontend/.env` 中设置 `VITE_DEV_PORT=8090`、`VITE_DEV_BACKEND_URL=http://localhost:3001`，后端通过环境变量 `PORT=3001` 启动。参见 `frontend/.env.example` 与 `backend/.env.example`。
+
 ## 技术栈
 
 - **Vue 3** - 渐进式 JavaScript 框架

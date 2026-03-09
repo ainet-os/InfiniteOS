@@ -1,6 +1,22 @@
 import si from 'systeminformation'
 import { execCommand, execSudo } from '../utils/exec.js'
 
+/** 检测 Tailscale 是否已在线（tailscale0 在 ip link 中常为 state UNKNOWN，以 tailscale status 为准） */
+async function isTailscaleInterfaceUp() {
+  try {
+    const { stdout } = await execCommand('tailscale status --json 2>/dev/null')
+    if (!stdout || !stdout.trim()) return false
+    const data = JSON.parse(stdout)
+    if (data.BackendState === 'NeedsLogin' || data.BackendState === 'Stopped') return false
+    if (data.Self && data.Self.Online === false) return false
+    if (data.Self && data.Self.Online === true) return true
+    if (data.Self && data.Self.TailscaleIPs && data.Self.TailscaleIPs.length > 0) return true
+    return false
+  } catch (_) {
+    return false
+  }
+}
+
 /**
  * 获取网络接口列表
  */
@@ -16,10 +32,17 @@ export const getNetworkInterfaces = async () => {
       statsMap[stat.iface] = stat
     })
 
+    const hasTailscale = networkInterfaces.some(i => i.iface === 'tailscale0' || i.iface.startsWith('tailscale'))
+    const tailscaleUp = hasTailscale ? await isTailscaleInterfaceUp() : false
+
     return networkInterfaces.map(iface => {
       const stats = statsMap[iface.iface] || {}
       const ip4 = iface.ip4 || ''
       const ip6 = iface.ip6 || ''
+      const isTailscaleIface = iface.iface === 'tailscale0' || iface.iface.startsWith('tailscale')
+      let status = iface.operstate === 'up' ? 'up' : 'down'
+      if (isTailscaleIface && tailscaleUp) status = 'up'
+      if (isTailscaleIface && (iface.operstate === 'unknown' || iface.operstate === 'down') && !tailscaleUp) status = 'down'
 
       return {
         name: iface.iface,
@@ -27,7 +50,7 @@ export const getNetworkInterfaces = async () => {
         mac: iface.mac || '',
         ip4: ip4,
         ip6: ip6,
-        status: iface.operstate === 'up' ? 'up' : 'down',
+        status,
         speed: iface.speed || 0,
         rx_bytes: stats.rx_bytes || 0,
         tx_bytes: stats.tx_bytes || 0,

@@ -10,6 +10,12 @@ import {
   updateModel,
   getModelConfig,
   updateModelConfig,
+  getLocalModels,
+  getCloudModels,
+  getLocalModelDetail,
+  getCloudModelDetail,
+  syncModelByName,
+  deleteLocalModel,
 } from '../services/modelService.js'
 import { deployModel, getDeployments, deleteDeployment } from '../services/modelDeployService.js'
 
@@ -22,7 +28,7 @@ const upload = multer({ storage: multer.memoryStorage() })
 router.use(authenticateToken)
 
 /**
- * 获取模型列表
+ * 获取模型列表（兼容旧接口）
  * GET /api/models
  */
 router.get('/', async (req, res) => {
@@ -32,6 +38,95 @@ router.get('/', async (req, res) => {
   } catch (error) {
     console.error('获取模型列表错误:', error)
     res.status(500).json({ error: '获取模型列表失败' })
+  }
+})
+
+/**
+ * 获取本地模型列表（/var/data/pubmodels 下子目录，目录名为模型名）
+ * GET /api/models/local
+ */
+router.get('/local', async (req, res) => {
+  try {
+    const list = await getLocalModels()
+    res.json(list)
+  } catch (error) {
+    console.error('获取本地模型列表错误:', error)
+    res.status(500).json({ error: '获取本地模型列表失败' })
+  }
+})
+
+/**
+ * 获取云端模型列表（配置的存储桶中按前缀，每个顶层前缀为模型名）
+ * GET /api/models/cloud
+ */
+router.get('/cloud', async (req, res) => {
+  try {
+    const list = await getCloudModels()
+    res.json(list)
+  } catch (error) {
+    console.error('获取云端模型列表错误:', error)
+    res.status(500).json({ error: '获取云端模型列表失败' })
+  }
+})
+
+/**
+ * 获取本地模型详情（模型名 + 目录下所有文件）
+ * GET /api/models/local/:name
+ */
+router.get('/local/:name', async (req, res) => {
+  try {
+    const { name } = req.params
+    const detail = await getLocalModelDetail(decodeURIComponent(name))
+    if (!detail) return res.status(404).json({ error: '模型不存在' })
+    res.json(detail)
+  } catch (error) {
+    console.error('获取本地模型详情错误:', error)
+    res.status(500).json({ error: error.message || '获取本地模型详情失败' })
+  }
+})
+
+/**
+ * 获取云端模型详情（模型名 + 该前缀下所有对象）
+ * GET /api/models/cloud/:name
+ */
+router.get('/cloud/:name', async (req, res) => {
+  try {
+    const { name } = req.params
+    const detail = await getCloudModelDetail(decodeURIComponent(name))
+    res.json(detail)
+  } catch (error) {
+    console.error('获取云端模型详情错误:', error)
+    res.status(500).json({ error: error.message || '获取云端模型详情失败' })
+  }
+})
+
+/**
+ * 同步单个云端模型到本地
+ * POST /api/models/sync/:name
+ */
+router.post('/sync/:name', async (req, res) => {
+  try {
+    const { name } = req.params
+    const result = await syncModelByName(decodeURIComponent(name))
+    res.json(result)
+  } catch (error) {
+    console.error('同步模型错误:', error)
+    res.status(500).json({ error: error.message || '同步模型失败' })
+  }
+})
+
+/**
+ * 删除本地模型
+ * DELETE /api/models/local/:name
+ */
+router.delete('/local/:name', async (req, res) => {
+  try {
+    const { name } = req.params
+    await deleteLocalModel(decodeURIComponent(name))
+    res.json({ message: '删除成功' })
+  } catch (error) {
+    console.error('删除本地模型错误:', error)
+    res.status(500).json({ error: error.message || '删除失败' })
   }
 })
 
