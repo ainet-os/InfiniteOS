@@ -12,6 +12,9 @@ const checkKubectl = async () => {
   }
 }
 
+// 使用可访问 k3s API 的 kubeconfig（如从 master 复制的配置），使 worker 节点上的 InfiniteOS 能列出集群 Pod
+const KUBECONFIG_PATH = process.env.KUBECONFIG_PATH || '/etc/infiniteos-k8s/kubeconfig.yaml'
+
 /**
  * 执行kubectl命令
  */
@@ -21,7 +24,7 @@ const kubectl = async (command) => {
     throw new Error('kubectl未安装或不可用')
   }
 
-  const { stdout, success, stderr } = await execSudo(`kubectl ${command}`)
+  const { stdout, success, stderr } = await execSudo(`kubectl --kubeconfig=${KUBECONFIG_PATH} ${command}`)
   if (!success) {
     throw new Error(stderr || 'kubectl命令执行失败')
   }

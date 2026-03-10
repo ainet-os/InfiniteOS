@@ -30,6 +30,7 @@
                 <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-400 uppercase">{{ $t('common.restartCount') }}</th>
                 <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-400 uppercase">{{ $t('common.age') }}</th>
                 <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-400 uppercase">{{ $t('common.actions') }}</th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-400 uppercase">推理 API</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-gray-200 dark:divide-gray-800">
@@ -73,6 +74,18 @@
                     </button>
                   </div>
                 </td>
+                <td class="px-6 py-4 text-sm">
+                  <a
+                    v-if="isVllmInferencePod(pod.name)"
+                    :href="vllmApiBaseUrl"
+                    target="_blank"
+                    rel="noopener"
+                    class="text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300 break-all"
+                  >
+                    {{ vllmApiBaseUrl }}
+                  </a>
+                  <span v-else class="text-gray-400">—</span>
+                </td>
               </tr>
             </tbody>
           </table>
@@ -90,6 +103,14 @@ import type { Pod } from '@/api/k8s'
 
 const loading = ref(false)
 const pods = ref<Pod[]>([])
+
+// Qwen3-VL 等 vLLM 推理服务 NodePort 端口，与 deployments/qwen3-vl-32b-vllm.yaml 中一致
+const VLLM_NODEPORT = 30090
+const vllmApiBaseUrl = typeof window !== 'undefined'
+  ? `${window.location.protocol}//${window.location.hostname}:${VLLM_NODEPORT}`
+  : `http://localhost:${VLLM_NODEPORT}`
+
+const isVllmInferencePod = (name: string) => /qwen3-vl.*vllm|vllm.*qwen/i.test(name)
 
 // 加载Pods列表
 const loadPods = async () => {

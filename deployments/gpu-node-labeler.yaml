@@ -1,0 +1,142 @@
+---
+# GPU 节点信息打标器：在每个有 NVIDIA GPU 的 worker 上运行 nvidia-smi，
+# 将每张卡的信息写入 Node 的 Label，便于查看和调度时按卡选择。
+#
+# 使用方式：
+#   kubectl apply -f gpu-node-labeler.yaml
+#
+# 查看某节点 GPU 信息：
+#   kubectl describe node <node-name> | grep nvidia.com/gpu
+#   kubectl get node <node-name> -o jsonpath='{.metadata.labels}' | tr ',' '\n' | grep nvidia
+#
+# 部署时指定「用该节点上第一张 48G 的卡」：
+#   nodeSelector:
+#     nvidia.com/gpu.0.memory: "48Gi"
+#   resources.limits: nvidia.com/gpu: "1"
+#
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gpu-tools
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gpu-node-labeler
+  namespace: gpu-tools
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: gpu-node-labeler
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: gpu-node-labeler
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: gpu-node-labeler
+subjects:
+  - kind: ServiceAccount
+    name: gpu-node-labeler
+    namespace: gpu-tools
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: gpu-node-labeler
+  namespace: gpu-tools
+  labels:
+    app: gpu-node-labeler
+spec:
+  selector:
+    matchLabels:
+      app: gpu-node-labeler
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: gpu-node-labeler
+    spec:
+      serviceAccountName: gpu-node-labeler
+      hostPID: true
+      hostNetwork: true
+      tolerations:
+        - operator: Exists
+      # 在所有节点运行；无 GPU 的节点内 nvidia-smi 会不可用，脚本会直接 sleep
+      containers:
+        - name: labeler
+          image: ubuntu:22.04
+          command:
+            - /bin/bash
+            - -c
+            - |
+              apt-get update -qq && apt-get install -y -qq curl >/dev/null 2>&1 || true
+              set -e
+              NODE_NAME="${NODE_NAME:-}"
+              [ -n "$NODE_NAME" ] || exit 1
+              export PATH="/host/usr/bin:$PATH"
+              export LD_LIBRARY_PATH="/host/usr/lib/x86_64-linux-gnu:/host/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH"
+              if ! nvidia-smi -q &>/dev/null; then
+                echo "nvidia-smi not available, skip"
+                sleep 3600
+                exit 0
+              fi
+              COUNT=$(nvidia-smi --query-gpu=count --format=csv,noheader | head -1)
+              COUNT=${COUNT:-0}
+              LABELS="nvidia.com/gpu.count=$COUNT"
+              for i in $(seq 0 $((COUNT-1))); do
+                NAME=$(nvidia-smi -i $i --query-gpu=name --format=csv,noheader 2>/dev/null | sed 's/[^a-zA-Z0-9.-]/ /g' | tr -s ' ' | tr ' ' '-' | cut -c1-63)
+                MEM_MB=$(nvidia-smi -i $i --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | tr -d ' ')
+                [ -z "$MEM_MB" ] && MEM_MB=0
+                MEM_GI=$((MEM_MB / 1024))
+                [ $MEM_GI -lt 1 ] && MEM_GI=1
+                LABELS="$LABELS nvidia.com/gpu.$i.name=$NAME nvidia.com/gpu.$i.memory=${MEM_GI}Gi"
+              done
+              PATCH="{\"metadata\":{\"labels\":{"
+              first=1
+              for pair in $LABELS; do
+                key="${pair%%=*}"
+                val="${pair#*=}"
+                [ $first -eq 1 ] && first=0 || PATCH="$PATCH,"
+                PATCH="$PATCH\"$key\":\"$val\""
+              done
+              PATCH="$PATCH}}}"
+              KUBE_TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+              curl -s -k -X PATCH \
+                -H "Authorization: Bearer $KUBE_TOKEN" \
+                -H "Content-Type: application/strategic-merge-patch+json" \
+                "https://${KUBERNETES_SERVICE_HOST}:${KUBERNETES_SERVICE_PORT}/api/v1/nodes/$NODE_NAME" \
+                -d "$PATCH" || true
+              echo "Labels set: $LABELS"
+              sleep 3600
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: host-usr
+              mountPath: /host/usr
+              readOnly: true
+            - name: host-lib
+              mountPath: /host/lib
+              readOnly: true
+      volumes:
+        - name: host-usr
+          hostPath:
+            path: /usr
+            type: Directory
+        - name: host-lib
+          hostPath:
+            path: /lib
+            type: Directory

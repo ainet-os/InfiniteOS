@@ -1,0 +1,105 @@
+---
+# Qwen3-VL-32B-Instruct-FP8 vLLM 推理服务
+# 模型: /var/data/pubmodels/Qwen3-VL-32B-Instruct-FP8
+# GPU: 1x 4090 48G, 端口: 9000
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qwen3-vl-32b-instruct-fp8-vllm
+  namespace: default
+  labels:
+    app: qwen3-vl-32b-vllm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: qwen3-vl-32b-vllm
+  template:
+    metadata:
+      labels:
+        app: qwen3-vl-32b-vllm
+    spec:
+      containers:
+        - name: vllm
+          image: vllm/vllm-openai:latest
+          command:
+            - python3
+            - -m
+            - vllm.entrypoints.openai.api_server
+          args:
+            - --model
+            - /model/Qwen3-VL-32B-Instruct-FP8
+            - --host
+            - "0.0.0.0"
+            - --port
+            - "9000"
+            - --trust-remote-code
+            - --gpu-memory-utilization
+            - "0.98"
+            - --max-model-len
+            - "32768"
+            - --dtype
+            - auto
+          ports:
+            - containerPort: 9000
+              name: http
+          resources:
+            limits:
+              nvidia.com/gpu: "1"
+            requests:
+              nvidia.com/gpu: "1"
+              memory: "4Gi"
+              cpu: "2"
+          volumeMounts:
+            - name: model
+              mountPath: /model/Qwen3-VL-32B-Instruct-FP8
+              readOnly: true
+          env:
+            - name: CUDA_VISIBLE_DEVICES
+              value: "0"
+            - name: OPENBLAS_NUM_THREADS
+              value: "1"
+            - name: OMP_NUM_THREADS
+              value: "1"
+            - name: PYTORCH_ALLOC_CONF
+              value: "expandable_segments:True"
+      volumes:
+        - name: model
+          hostPath:
+            path: /var/data/pubmodels/Qwen3-VL-32B-Instruct-FP8
+            type: Directory
+      # 固定到本 worker 节点（假定该节点上 GPU 型号一致，request 1 个 nvidia.com/gpu 即可）
+      nodeSelector:
+        kubernetes.io/hostname: 4worker99.com
+      # 使用 nvidia 运行时，使容器内可见 GPU，避免 vLLM "Failed to infer device type"
+      runtimeClassName: nvidia
+      restartPolicy: Always
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: qwen3-vl-32b-instruct-fp8-vllm
+  namespace: default
+spec:
+  selector:
+    app: qwen3-vl-32b-vllm
+  ports:
+    - port: 9000
+      targetPort: 9000
+      name: http
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: qwen3-vl-32b-instruct-fp8-vllm-nodeport
+  namespace: default
+spec:
+  selector:
+    app: qwen3-vl-32b-vllm
+  ports:
+    - port: 9000
+      targetPort: 9000
+      nodePort: 30090
+      name: http
+  type: NodePort
