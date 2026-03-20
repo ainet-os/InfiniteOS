@@ -316,7 +316,6 @@ export default {
       register: '注册',
       joinNetwork: '组网',
       leaveNetwork: '离网',
-      joinPool: '加池',
       networkLogs: '组网执行日志',
       networkStatusHint: '组网状态“在线”表示本机已加入 Tailscale 网络；“离线”表示尚未组网或未连接，点击“组网”执行入网后应变为在线。',
       nodeType: '节点类型配置',

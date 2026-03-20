@@ -81,13 +81,6 @@
               {{ infiniteUnoLoading ? $t('common.loading') : $t('pages.settings.joinNetwork') }}
             </button>
             <button
-              @click="doJoinPool"
-              :disabled="infiniteUnoLoading"
-              class="px-4 py-2 bg-brand-500 text-white rounded-lg hover:bg-brand-600 disabled:opacity-50 transition-colors"
-            >
-              {{ infiniteUnoLoading ? $t('common.loading') : $t('pages.settings.joinPool') }}
-            </button>
-            <button
               @click="doLeaveNetwork"
               :disabled="infiniteUnoLoading"
               class="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 disabled:opacity-50 transition-colors"
@@ -183,7 +176,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AdminLayout from '@/components/layout/AdminLayout.vue'
 import { settingsApi, type InfiniteUnoStatus, type LicenseInfo } from '@/api/settings'
@@ -252,15 +245,6 @@ async function doJoinNetwork() {
     const err = e as { error?: string }
     networkError.value = err?.error || String(e)
     networkLogs.value = networkLogs.value.length > 0 ? [...networkLogs.value, `错误: ${err?.error || String(e)}`] : [`错误: ${err?.error || String(e)}`]
-  } finally {
-    infiniteUnoLoading.value = false
-  }
-}
-
-async function doJoinPool() {
-  infiniteUnoLoading.value = true
-  try {
-    infiniteUnoStatus.value = await settingsApi.joinPoolInfiniteUno()
   } finally {
     infiniteUnoLoading.value = false
   }

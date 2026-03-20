@@ -49,31 +49,66 @@ router.post('/infiniteuno/network/leave', async (req, res) => {
 /**
  * 组网：若已在线则返回状态不重复执行；否则从 InfiniteUno 获取 Headscale 配置并执行入网
  * POST /api/settings/infiniteuno/network
+ * 支持实时日志输出（通过 SSE）
  */
 router.post('/infiniteuno/network', async (req, res) => {
-  try {
-    const result = await performJoinNetwork()
-    res.json(result)
-  } catch (error) {
-    console.error('组网错误:', error)
-    res.status(500).json({ error: error.message || '组网失败' })
+  // 检查是否请求实时日志（通过查询参数或请求头）
+  const streamLogs = req.query.stream === 'true' || req.headers['accept']?.includes('text/event-stream')
+  
+  if (streamLogs) {
+    // 使用 Server-Sent Events 实时推送日志
+    res.setHeader('Content-Type', 'text/event-stream')
+    res.setHeader('Cache-Control', 'no-cache')
+    res.setHeader('Connection', 'keep-alive')
+    res.setHeader('X-Accel-Buffering', 'no') // 禁用 nginx 缓冲
+    
+    try {
+      let finalResult = null
+      let finalError = null
+      
+      await performJoinNetwork((log) => {
+        // 实时推送日志
+        const data = `data: ${JSON.stringify({ type: 'log', message: log })}\n\n`
+        res.write(data)
+        // 尝试刷新响应（如果支持）
+        if (typeof res.flush === 'function') {
+          res.flush()
+        }
+      })
+        .then(result => {
+          finalResult = result
+          res.write(`data: ${JSON.stringify({ type: 'success', data: result })}\n\n`)
+        })
+        .catch(error => {
+          finalError = error
+          res.write(`data: ${JSON.stringify({ type: 'error', error: error.message || '组网失败' })}\n\n`)
+        })
+        .finally(() => {
+          res.end()
+        })
+    } catch (error) {
+      console.error('组网错误:', error)
+      res.write(`data: ${JSON.stringify({ type: 'error', error: error.message || '组网失败' })}\n\n`)
+      res.end()
+    }
+  } else {
+    // 传统方式：等待完成后返回结果
+    try {
+      const result = await performJoinNetwork()
+      res.json(result)
+    } catch (error) {
+      console.error('组网错误:', error)
+      res.status(500).json({ error: error.message || '组网失败' })
+    }
   }
 })
 
 /**
- * 加池（加入 default k3s 集群）
+ * 加池（加入 default 算力池 ai-default 集群）
+ * 调用 InfiniteUno join-default-pool API 获取节点注册命令，并在本机执行，将当前节点作为 k3s worker 加入
  * POST /api/settings/infiniteuno/pool
+ * 支持实时日志输出（通过 SSE）
  */
-router.post('/infiniteuno/pool', async (req, res) => {
-  try {
-    const status = await getInfiniteUnoStatus()
-    res.json({ message: '加池请求已提交', ...status })
-  } catch (error) {
-    console.error('加池错误:', error)
-    res.status(500).json({ error: '加池失败' })
-  }
-})
-
 /**
  * 获取 InfiniteUno 状态与配置
  * GET /api/settings/infiniteuno

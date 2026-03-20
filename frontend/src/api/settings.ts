@@ -37,9 +37,6 @@ export const settingsApi = {
   leaveNetworkInfiniteUno() {
     return api.post<InfiniteUnoStatus & { message: string }>('/settings/infiniteuno/network/leave')
   },
-  joinPoolInfiniteUno() {
-    return api.post<InfiniteUnoStatus & { message: string }>('/settings/infiniteuno/pool')
-  },
   getNodeType() {
     return api.get<{ nodeType: string }>('/settings/nodetype')
   },

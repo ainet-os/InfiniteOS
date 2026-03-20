@@ -317,7 +317,6 @@ export default {
       register: 'Register',
       joinNetwork: 'Join Network',
       leaveNetwork: 'Leave Network',
-      joinPool: 'Join Pool',
       networkLogs: 'Join Network Log',
       networkStatusHint: '“Online” means this device is on the Tailscale network; “Offline” means not yet joined. After clicking “Join Network”, status should become Online.',
       nodeType: 'Node Type',
