@@ -6,23 +6,26 @@ const execAsync = promisify(exec)
 /**
  * 执行系统命令
  * @param {string} command - 要执行的命令
- * @param {object} options - 执行选项
- * @returns {Promise<{stdout: string, stderr: string}>}
+ * @param {object} options - 执行选项，支持 timeout（毫秒），超时后终止进程
+ * @returns {Promise<{stdout: string, stderr: string, success: boolean}>}
  */
 export const execCommand = async (command, options = {}) => {
   try {
     const { stdout, stderr } = await execAsync(command, {
       encoding: 'utf8',
       maxBuffer: 10 * 1024 * 1024, // 10MB
+      timeout: 10000, // 默认 10 秒，防止 nvidia-smi 等命令卡住
       ...options,
     })
     return { stdout: stdout.trim(), stderr: stderr.trim(), success: true }
   } catch (error) {
+    const timedOut = error.killed === true || error.signal === 'SIGTERM'
     return {
       stdout: error.stdout?.trim() || '',
       stderr: error.stderr?.trim() || error.message,
       success: false,
       error: error.message,
+      timedOut: !!timedOut,
     }
   }
 }

@@ -26,6 +26,7 @@
     "multer": "^2.0.2",
     "systeminformation": "^5.21.20",
     "websockify": "^0.7.1",
-    "ws": "^8.18.3"
+    "ws": "^8.18.3",
+    "yaml": "^2.8.2"
   }
 }
