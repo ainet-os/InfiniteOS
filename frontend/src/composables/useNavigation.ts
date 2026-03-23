@@ -123,14 +123,9 @@ export const getNavigationItems = (): NavigationItem[] => [
     ],
   },
   {
-    name: 'Settings',
-    path: '/settings',
+    name: 'About',
+    path: '/about',
     permission: 'settings.view',
-    subItems: [
-      { name: 'General', path: '/settings/general', permission: 'settings.view' },
-      { name: 'Security', path: '/settings/security', permission: 'settings.security' },
-      { name: 'Tenant', path: '/settings/tenant', permission: 'settings.tenant' },
-    ],
   },
 ]
 

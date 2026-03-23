@@ -577,7 +577,7 @@ import {
   ModelIcon,
   NetworkIcon,
   StorageIcon,
-  SettingsIcon,
+  InfoCircleIcon,
   UserGroupIcon,
   DocsIcon,
   SupportIcon,
@@ -683,9 +683,9 @@ const systemItems = computed<MenuItem[]>(() => [
     path: '/users',
   },
   {
-    icon: SettingsIcon,
-    name: t('menu.settings'),
-    path: '/settings',
+    icon: InfoCircleIcon,
+    name: t('menu.about'),
+    path: '/about',
   },
 ])
 

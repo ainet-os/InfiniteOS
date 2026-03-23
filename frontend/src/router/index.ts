@@ -188,10 +188,14 @@ const router = createRouter({
     },
     {
       path: '/settings',
-      name: 'Settings',
+      redirect: '/about',
+    },
+    {
+      path: '/about',
+      name: 'About',
       component: () => import('../views/System/Settings/Index.vue'),
       meta: {
-        title: '设置',
+        title: '关于',
         requiresAuth: true,
       },
     },
@@ -247,7 +251,7 @@ router.beforeEach((to, from, next) => {
     '/terminal': 'pages.terminal.title',
     '/logs': 'pages.logs.title',
     '/users': 'pages.users.title',
-    '/settings': 'pages.settings.title',
+    '/about': 'pages.about.title',
     '/docs': 'menu.docs',
     '/help': 'menu.help',
     '/sponsor': 'menu.sponsor',
