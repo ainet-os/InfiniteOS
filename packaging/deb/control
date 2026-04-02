@@ -1,0 +1,14 @@
+Package: iosm
+Version: __VERSION__
+Section: admin
+Priority: optional
+Architecture: __ARCH__
+Maintainer: InfiniteOS Maintainers <support@ai.net>
+Depends: nodejs (>= 20), nginx, systemd, docker.io, libvirt-clients
+Installed-Size: __INSTALLED_SIZE__
+Description: InfiniteOS management platform (backend + frontend)
+ InfiniteOS provides a web-based management plane for compute, containers,
+ virtual machines, network, storage, and system observability.
+ This package deploys:
+  - backend API as a systemd service (iosm-backend)
+  - frontend static files served by nginx with /api reverse proxy

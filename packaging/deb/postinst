@@ -1,0 +1,21 @@
+#!/bin/sh
+set -e
+
+if [ -d /etc/nginx/sites-available ] && [ -d /etc/nginx/sites-enabled ]; then
+  if [ ! -e /etc/nginx/sites-enabled/iosm.conf ]; then
+    ln -s /etc/nginx/sites-available/iosm.conf /etc/nginx/sites-enabled/iosm.conf
+  fi
+fi
+
+if command -v nginx >/dev/null 2>&1; then
+  nginx -t
+fi
+
+if [ -d /run/systemd/system ]; then
+  systemctl daemon-reload
+  systemctl enable iosm-backend.service
+  systemctl restart iosm-backend.service
+  systemctl reload nginx || systemctl restart nginx
+fi
+
+exit 0

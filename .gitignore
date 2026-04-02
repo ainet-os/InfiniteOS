@@ -114,6 +114,8 @@ out
 .vscode-test
 
 
-
+.codex
+AGENTS.md
+packaging/.build/
 
 

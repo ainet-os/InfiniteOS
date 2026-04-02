@@ -1,0 +1,17 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = "remove" ] || [ "$1" = "deconfigure" ]; then
+  if [ -d /run/systemd/system ]; then
+    systemctl stop iosm-backend.service || true
+    systemctl disable iosm-backend.service || true
+  fi
+
+  rm -f /etc/nginx/sites-enabled/iosm.conf
+
+  if [ -d /run/systemd/system ]; then
+    systemctl reload nginx || true
+  fi
+fi
+
+exit 0

@@ -6,7 +6,7 @@
         <p class="text-gray-600 dark:text-gray-400 mt-1">{{ $t('pages.terminal.description') }}</p>
       </div>
 
-      <div class="flex-1 rounded-lg bg-white dark:bg-white/[0.03] border border-gray-200 dark:border-gray-800 overflow-hidden flex flex-col">
+      <div class="flex-1 min-w-0 rounded-lg bg-white dark:bg-white/[0.03] border border-gray-200 dark:border-gray-800 overflow-hidden flex flex-col">
         <!-- 终端工具栏 -->
         <div class="px-4 py-2 bg-gray-50 dark:bg-white/[0.02] border-b border-gray-200 dark:border-gray-800 flex items-center justify-between">
           <div class="flex items-center gap-2">
@@ -49,7 +49,7 @@
         <!-- xterm.js终端容器 -->
         <div
           ref="terminalContainer"
-          class="flex-1 bg-gray-900 dark:bg-gray-950 overflow-hidden"
+          class="flex-1 min-w-0 bg-gray-900 dark:bg-gray-950 overflow-hidden"
           style="min-height: 0;"
         ></div>
       </div>
@@ -79,7 +79,12 @@ let ws: WebSocket | null = null
 let reconnectAttempts = 0
 const maxReconnectAttempts = 3
 let connectTimeout: number | null = null
+let resizeHandler: (() => void) | null = null
 const CONNECTION_TIMEOUT = 10000 // 10秒超时
+const TERMINAL_CONTROL_PREFIX = '\u0000__INFINITEOS_TERMINAL_CONTROL__'
+let resizeObserver: ResizeObserver | null = null
+let contextMenuHandler: ((event: MouseEvent) => void) | null = null
+let lastTerminalSize: { cols: number; rows: number } | null = null
 
 // 获取WebSocket URL
 const getWsUrl = () => {
@@ -87,6 +92,46 @@ const getWsUrl = () => {
   const host = window.location.host
   const token = localStorage.getItem('token')
   return `${protocol}//${host}/api/terminal/ws?token=${token || ''}`
+}
+
+const getErrorMessage = (error: unknown) => {
+  if (error instanceof Error) {
+    return error.message
+  }
+
+  return String(error)
+}
+
+const sendTerminalResize = (
+  cols: number | undefined = terminal?.cols,
+  rows: number | undefined = terminal?.rows,
+  force = false,
+) => {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return
+
+  const nextCols = Number(cols)
+  const nextRows = Number(rows)
+
+  if (!Number.isFinite(nextCols) || !Number.isFinite(nextRows)) return
+  if (nextCols <= 0 || nextRows <= 0) return
+
+  if (!force && lastTerminalSize?.cols === nextCols && lastTerminalSize?.rows === nextRows) {
+    return
+  }
+
+  lastTerminalSize = { cols: nextCols, rows: nextRows }
+  ws.send(
+    `${TERMINAL_CONTROL_PREFIX}${JSON.stringify({ type: 'resize', cols: nextCols, rows: nextRows })}`,
+  )
+}
+
+const fitTerminal = () => {
+  if (!fitAddon || !terminal || !terminalContainer.value) return
+
+  const container = terminalContainer.value
+  if (container.offsetWidth <= 0 || container.offsetHeight <= 0) return
+
+  fitAddon.fit()
 }
 
 // 初始化xterm终端
@@ -103,7 +148,7 @@ const initTerminal = () => {
       background: '#111827', // gray-900
       foreground: '#d1d5db', // gray-300
       cursor: '#10b981', // green-500
-      selection: '#374151', // gray-700
+      selectionBackground: '#374151', // gray-700
     },
     allowProposedApi: true,
     convertEol: true, // 将\n转换为\r\n，确保正确换行
@@ -117,33 +162,27 @@ const initTerminal = () => {
 
   // 打开终端
   terminal.open(terminalContainer.value)
+  terminal.onResize(({ cols, rows }) => {
+    sendTerminalResize(cols, rows)
+  })
 
   // 等待DOM完全渲染后再调整大小
   nextTick(() => {
-    if (fitAddon && terminalContainer.value) {
-      // 确保容器有尺寸
-      const container = terminalContainer.value
-      if (container.offsetWidth > 0 && container.offsetHeight > 0) {
-        fitAddon.fit()
-      } else {
-        // 如果容器还没有尺寸，延迟一下再调整
-        setTimeout(() => {
-          if (fitAddon) {
-            fitAddon.fit()
-          }
-        }, 100)
-      }
+    fitTerminal()
+
+    if (!terminalContainer.value) return
+    const container = terminalContainer.value
+
+    if (container.offsetWidth <= 0 || container.offsetHeight <= 0) {
+      setTimeout(() => {
+        fitTerminal()
+      }, 100)
     }
   })
 
   // 监听窗口大小变化
-  const resizeObserver = new ResizeObserver(() => {
-    if (fitAddon && terminal && terminalContainer.value) {
-      const container = terminalContainer.value
-      if (container.offsetWidth > 0 && container.offsetHeight > 0) {
-        fitAddon.fit()
-      }
-    }
+  resizeObserver = new ResizeObserver(() => {
+    fitTerminal()
   })
   if (terminalContainer.value) {
     resizeObserver.observe(terminalContainer.value)
@@ -153,16 +192,12 @@ const initTerminal = () => {
   const handleWindowResize = () => {
     if (fitAddon && terminal) {
       setTimeout(() => {
-        if (fitAddon) {
-          fitAddon.fit()
-        }
+        fitTerminal()
       }, 50)
     }
   }
   window.addEventListener('resize', handleWindowResize)
-  
-  // 保存清理函数
-  ;(terminal as any)._resizeHandler = handleWindowResize
+  resizeHandler = handleWindowResize
 
   // 监听终端输入
   terminal.onData((data) => {
@@ -213,7 +248,7 @@ const initTerminal = () => {
   })
 
   // 右键菜单支持复制粘贴
-  terminalContainer.value.addEventListener('contextmenu', (e) => {
+  contextMenuHandler = (e: MouseEvent) => {
     e.preventDefault()
     if (terminal?.hasSelection()) {
       const selection = terminal.getSelection()
@@ -228,7 +263,8 @@ const initTerminal = () => {
         }
       }).catch(() => {})
     }
-  })
+  }
+  terminalContainer.value.addEventListener('contextmenu', contextMenuHandler)
 }
 
 // 清除连接超时
@@ -270,7 +306,7 @@ const connect = () => {
         }
         try {
           ws?.close()
-        } catch (_) {}
+        } catch {}
         ws = null
         clearConnectTimeout()
       }
@@ -282,12 +318,12 @@ const connect = () => {
       isConnected.value = true
       isConnecting.value = false
       reconnectAttempts = 0
+      lastTerminalSize = null
       if (terminal) {
         terminal.clear()
         // 确保终端大小正确
-        if (fitAddon) {
-          fitAddon.fit()
-        }
+        fitTerminal()
+        sendTerminalResize(undefined, undefined, true)
         terminal.writeln('\x1b[32m' + $t('pages.terminal.connected') + '\x1b[0m')
       }
     }
@@ -300,7 +336,7 @@ const connect = () => {
         } else if (event.data instanceof Blob) {
           event.data.text().then((text: string) => {
             if (terminal) terminal.write(text)
-          }).catch((err: any) => {
+          }).catch((err: unknown) => {
             console.error('读取Blob数据失败:', err)
           })
         } else if (event.data instanceof ArrayBuffer) {
@@ -353,12 +389,12 @@ const connect = () => {
         ws = null
       }
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Failed to connect:', error)
     clearConnectTimeout()
     isConnecting.value = false
     if (terminal) {
-      terminal.writeln('\r\n\x1b[31m' + $t('pages.terminal.connectionFailed') + ': ' + (error.message || error) + '\x1b[0m')
+      terminal.writeln('\r\n\x1b[31m' + $t('pages.terminal.connectionFailed') + ': ' + getErrorMessage(error) + '\x1b[0m')
     }
   }
 }
@@ -369,7 +405,7 @@ const disconnect = () => {
   if (ws) {
     try {
       ws.close(1000, 'User disconnected')
-    } catch (_) {}
+    } catch {}
     ws = null
   }
   isConnected.value = false
@@ -408,8 +444,17 @@ onUnmounted(() => {
   clearConnectTimeout()
   disconnect()
   // 移除窗口resize监听
-  if (terminal && (terminal as any)._resizeHandler) {
-    window.removeEventListener('resize', (terminal as any)._resizeHandler)
+  if (resizeHandler) {
+    window.removeEventListener('resize', resizeHandler)
+    resizeHandler = null
+  }
+  if (resizeObserver) {
+    resizeObserver.disconnect()
+    resizeObserver = null
+  }
+  if (terminalContainer.value && contextMenuHandler) {
+    terminalContainer.value.removeEventListener('contextmenu', contextMenuHandler)
+    contextMenuHandler = null
   }
   if (terminal) {
     terminal.dispose()

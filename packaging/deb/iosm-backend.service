@@ -1,0 +1,17 @@
+[Unit]
+Description=InfiniteOS Backend API Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/iosm/backend
+EnvironmentFile=-/etc/iosm/backend.env
+ExecStart=/usr/bin/node /opt/iosm/backend/dist/server.mjs
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

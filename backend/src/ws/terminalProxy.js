@@ -1,8 +1,160 @@
 import { spawn } from 'child_process'
+import { readdirSync, readlinkSync } from 'fs'
 import jwt from 'jsonwebtoken'
 import { WebSocketServer } from 'ws'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'infiniteos-secret-key-change-in-production'
+const DEFAULT_SHELL = '/bin/bash'
+const DEFAULT_HOME = process.env.HOME || '/root'
+const TERMINAL_CONTROL_PREFIX = '\u0000__INFINITEOS_TERMINAL_CONTROL__'
+
+function escapeShellPathForCommand(shellPath) {
+  return `"${String(shellPath).replace(/(["\\$`])/g, '\\$1')}"`
+}
+
+function buildTerminalEnv(shellPath) {
+  const env = {
+    ...process.env,
+    SHELL: shellPath,
+    TERM: 'xterm-256color',
+    COLORTERM: 'truecolor',
+    HOME: process.env.HOME || DEFAULT_HOME,
+  }
+
+  for (const key of Object.keys(env)) {
+    if (key === 'LANG' || key.startsWith('LC_')) {
+      delete env[key]
+    }
+  }
+
+  env.LANG = 'C.UTF-8'
+  env.LC_ALL = 'C.UTF-8'
+  env.LC_CTYPE = 'C.UTF-8'
+
+  return env
+}
+
+function createTerminalProcess() {
+  const shellPath = DEFAULT_SHELL
+  const env = buildTerminalEnv(shellPath)
+  const shellCommand = `${escapeShellPathForCommand(shellPath)} -i`
+
+  return spawn('script', ['-q', '-e', '-f', '-c', shellCommand, '/dev/null'], {
+    cwd: env.HOME || DEFAULT_HOME,
+    env,
+    stdio: ['pipe', 'pipe', 'pipe'],
+  })
+}
+
+function getTerminalPtyPath(shell) {
+  if (!shell?.pid) {
+    return null
+  }
+
+  if (shell._ptyPath) {
+    return shell._ptyPath
+  }
+
+  try {
+    const fdDir = `/proc/${shell.pid}/fd`
+
+    for (const fdName of readdirSync(fdDir)) {
+      const target = readlinkSync(`${fdDir}/${fdName}`)
+
+      if (/^\/dev\/pts\/\d+$/.test(target)) {
+        shell._ptyPath = target
+        return target
+      }
+    }
+  } catch (_) {}
+
+  return null
+}
+
+function clearShellResizeRetryTimer(shell) {
+  if (shell?._resizeRetryTimer) {
+    clearTimeout(shell._resizeRetryTimer)
+    shell._resizeRetryTimer = null
+  }
+}
+
+function clearShellKillTimer(shell) {
+  if (shell?._killTimer) {
+    clearTimeout(shell._killTimer)
+    shell._killTimer = null
+  }
+}
+
+function applyTerminalResize(shell, cols, rows) {
+  if (!shell || shell.killed) {
+    return
+  }
+
+  const normalizedCols = Number.parseInt(String(cols), 10)
+  const normalizedRows = Number.parseInt(String(rows), 10)
+
+  if (!Number.isFinite(normalizedCols) || !Number.isFinite(normalizedRows)) {
+    return
+  }
+
+  if (normalizedCols <= 0 || normalizedRows <= 0) {
+    return
+  }
+
+  if (shell._lastResize?.cols === normalizedCols && shell._lastResize?.rows === normalizedRows) {
+    return
+  }
+
+  const ptyPath = getTerminalPtyPath(shell)
+
+  if (!ptyPath) {
+    shell._resizeRetryCount = (shell._resizeRetryCount || 0) + 1
+
+    if (shell._resizeRetryCount <= 5) {
+      clearShellResizeRetryTimer(shell)
+      shell._resizeRetryTimer = setTimeout(() => {
+        shell._resizeRetryTimer = null
+        applyTerminalResize(shell, normalizedCols, normalizedRows)
+      }, 50)
+    }
+
+    return
+  }
+
+  clearShellResizeRetryTimer(shell)
+  shell._resizeRetryCount = 0
+  shell._lastResize = { cols: normalizedCols, rows: normalizedRows }
+
+  const resizeProcess = spawn(
+    'stty',
+    ['-F', ptyPath, 'rows', String(normalizedRows), 'cols', String(normalizedCols)],
+    { stdio: 'ignore' },
+  )
+
+  resizeProcess.on('error', () => {})
+}
+
+function parseTerminalControlMessage(data) {
+  let input
+
+  if (typeof data === 'string') {
+    input = data
+  } else if (Buffer.isBuffer(data)) {
+    input = data.toString('utf8')
+  } else {
+    input = String(data)
+  }
+
+  if (!input.startsWith(TERMINAL_CONTROL_PREFIX)) {
+    return null
+  }
+
+  try {
+    return JSON.parse(input.slice(TERMINAL_CONTROL_PREFIX.length))
+  } catch (_) {
+    return null
+  }
+}
 
 function rejectUpgrade(socket, statusCode, message) {
   try {
@@ -67,22 +219,8 @@ export function attachTerminalWsProxy(httpServer) {
     let isClosed = false
 
     try {
-      // 获取用户的shell（从环境变量或默认使用bash）
-      const userShell = process.env.SHELL || '/bin/bash'
-      const shellName = userShell.split('/').pop() || 'bash'
-
-      // 启动shell进程
-      shell = spawn(shellName, ['-i'], {
-        env: {
-          ...process.env,
-          TERM: 'xterm-256color',
-          COLORTERM: 'truecolor',
-          LANG: 'en_US.UTF-8',
-          LC_ALL: 'en_US.UTF-8',
-          LC_CTYPE: 'en_US.UTF-8',
-        },
-        stdio: ['pipe', 'pipe', 'pipe'],
-      })
+      // 使用 script 分配 PTY，避免交互 shell 在无 tty 下启动时报错
+      shell = createTerminalProcess()
 
       // 发送shell输出到WebSocket
       shell.stdout.on('data', (data) => {
@@ -117,6 +255,9 @@ export function attachTerminalWsProxy(httpServer) {
 
       // 处理shell退出
       shell.on('exit', (code, signal) => {
+        clearShellKillTimer(shell)
+        clearShellResizeRetryTimer(shell)
+
         if (!isClosed && ws.readyState === ws.OPEN) {
           try {
             ws.send(`\r\n[进程退出，代码: ${code || signal}]\r\n`)
@@ -126,6 +267,9 @@ export function attachTerminalWsProxy(httpServer) {
       })
 
       shell.on('error', (error) => {
+        clearShellKillTimer(shell)
+        clearShellResizeRetryTimer(shell)
+
         if (!isClosed && ws.readyState === ws.OPEN) {
           try {
             ws.send(`\r\n[错误: ${error.message}]\r\n`)
@@ -138,6 +282,13 @@ export function attachTerminalWsProxy(httpServer) {
       ws.on('message', (data) => {
         if (shell && !shell.killed && !isClosed) {
           try {
+            const controlMessage = parseTerminalControlMessage(data)
+
+            if (controlMessage?.type === 'resize') {
+              applyTerminalResize(shell, controlMessage.cols, controlMessage.rows)
+              return
+            }
+
             // 确保正确处理输入数据
             let input
             if (typeof data === 'string') {
@@ -169,10 +320,13 @@ export function attachTerminalWsProxy(httpServer) {
         isClosed = true
 
         try {
+          clearShellKillTimer(shell)
+          clearShellResizeRetryTimer(shell)
+
           if (shell && !shell.killed) {
             shell.kill('SIGTERM')
             // 如果SIGTERM无效，强制杀死
-            setTimeout(() => {
+            shell._killTimer = setTimeout(() => {
               if (shell && !shell.killed) {
                 shell.kill('SIGKILL')
               }
@@ -204,4 +358,3 @@ export function attachTerminalWsProxy(httpServer) {
 
   return wss
 }
-
