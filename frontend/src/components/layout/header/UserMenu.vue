@@ -78,7 +78,7 @@ interface UserInfo {
 const router = useRouter()
 const { t } = useI18n()
 const dropdownOpen = ref(false)
-const dropdownRef = ref(null)
+const dropdownRef = ref<HTMLElement | null>(null)
 const userInfo = ref<UserInfo | null>(null)
 
 // 从localStorage读取用户信息

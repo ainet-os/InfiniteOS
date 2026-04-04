@@ -4,9 +4,8 @@ import {
   getNetworkInterfaces,
   getNetworkStats,
   getInterfaceDetails,
-  createNetworkConnection,
+  applyNetworkChanges,
   updateNetworkConnection,
-  deleteNetworkConnection,
   toggleInterface,
 } from '../services/networkService.js'
 
@@ -64,11 +63,10 @@ router.get('/interfaces/:name', async (req, res) => {
  */
 router.post('/interfaces', async (req, res) => {
   try {
-    const result = await createNetworkConnection(req.body)
-    res.json(result)
+    res.status(501).json({ error: '当前 Netplan 模式不支持创建网络连接，请编辑现有接口' })
   } catch (error) {
     console.error('创建网络连接错误:', error)
-    res.status(500).json({ error: error.message || '创建网络连接失败' })
+    res.status(501).json({ error: error.message || '创建网络连接失败' })
   }
 })
 
@@ -88,17 +86,29 @@ router.put('/interfaces/:name', async (req, res) => {
 })
 
 /**
+ * 应用网络变更
+ * POST /api/network/apply
+ */
+router.post('/apply', async (req, res) => {
+  try {
+    const result = await applyNetworkChanges(req.body)
+    res.json(result)
+  } catch (error) {
+    console.error('应用网络变更错误:', error)
+    res.status(500).json({ error: error.message || '应用网络变更失败' })
+  }
+})
+
+/**
  * 删除网络连接
  * DELETE /api/network/interfaces/:name
  */
 router.delete('/interfaces/:name', async (req, res) => {
   try {
-    const { name } = req.params
-    const result = await deleteNetworkConnection(name)
-    res.json(result)
+    res.status(501).json({ error: '当前 Netplan 模式不支持删除网络连接' })
   } catch (error) {
     console.error('删除网络连接错误:', error)
-    res.status(500).json({ error: error.message || '删除网络连接失败' })
+    res.status(501).json({ error: error.message || '删除网络连接失败' })
   }
 })
 

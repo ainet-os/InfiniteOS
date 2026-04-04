@@ -231,14 +231,40 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
+import type { ApexOptions } from 'apexcharts'
 import AdminLayout from '@/components/layout/AdminLayout.vue'
 import VueApexCharts from 'vue3-apexcharts'
 
 const route = useRoute()
 const deviceId = parseInt(route.params.id as string)
 
-// Mock数据
-const device = ref({
+interface DeviceTask {
+  id: number
+  name: string
+  type: string
+  gpuUsage: number
+}
+
+interface DeviceDetail {
+  id: number
+  name: string
+  vendor: string
+  compute: string
+  memory: string
+  utilization: number
+  memoryUsage: number
+  status: 'available' | 'unavailable'
+  temperature: number | null
+  power: string | null
+  driver?: string
+  cudaVersion?: string
+  computeCapability?: string
+  powerLimit?: string
+  note?: string
+  tasks: DeviceTask[]
+}
+
+const device = ref<DeviceDetail>({
   id: deviceId,
   name: 'NVIDIA GeForce RTX 4090',
   vendor: 'NVIDIA',
@@ -270,28 +296,16 @@ const device = ref({
   ],
 })
 
-// 图表数据
-const gpuChartSeries = ref([{
-  name: 'GPU利用率',
-  data: [45, 52, 48, 61, 58, 65, 62, 68, 65, 70, 65, 72, 65],
-}])
+const gpuSeriesData = ref<number[]>([45, 52, 48, 61, 58, 65, 62, 68, 65, 70, 65, 72, 65])
+const memorySeriesData = ref<number[]>([42, 48, 45, 52, 50, 55, 58, 56, 58, 60, 58, 62, 58])
+const temperatureSeriesData = ref<number[]>([65, 68, 66, 70, 69, 72, 71, 73, 72, 74, 72, 75, 72])
+const powerSeriesData = ref<number[]>([380, 420, 400, 450, 435, 470, 460, 480, 470, 490, 450, 500, 450])
 
-const memoryChartSeries = ref([{
-  name: '显存使用率',
-  data: [42, 48, 45, 52, 50, 55, 58, 56, 58, 60, 58, 62, 58],
-}])
+const gpuChartSeries = computed(() => [{ name: 'GPU利用率', data: gpuSeriesData.value }])
+const memoryChartSeries = computed(() => [{ name: '显存使用率', data: memorySeriesData.value }])
+const temperatureChartSeries = computed(() => [{ name: '温度', data: temperatureSeriesData.value }])
+const powerChartSeries = computed(() => [{ name: '功耗', data: powerSeriesData.value }])
 
-const temperatureChartSeries = ref([{
-  name: '温度',
-  data: [65, 68, 66, 70, 69, 72, 71, 73, 72, 74, 72, 75, 72],
-}])
-
-const powerChartSeries = ref([{
-  name: '功耗',
-  data: [380, 420, 400, 450, 435, 470, 460, 480, 470, 490, 450, 500, 450],
-}])
-
-// 图表配置
 const chartOptions = {
   chart: {
     type: 'area',
@@ -324,9 +338,9 @@ const chartOptions = {
   tooltip: {
     theme: 'dark',
   },
-}
+} satisfies ApexOptions
 
-const gpuChartOptions = computed(() => ({
+const gpuChartOptions = computed<ApexOptions>(() => ({
   ...chartOptions,
   colors: ['#3C50E0'],
   fill: {
@@ -341,7 +355,7 @@ const gpuChartOptions = computed(() => ({
   },
 }))
 
-const memoryChartOptions = computed(() => ({
+const memoryChartOptions = computed<ApexOptions>(() => ({
   ...chartOptions,
   colors: ['#10B981'],
   fill: {
@@ -356,7 +370,7 @@ const memoryChartOptions = computed(() => ({
   },
 }))
 
-const temperatureChartOptions = computed(() => ({
+const temperatureChartOptions = computed<ApexOptions>(() => ({
   ...chartOptions,
   colors: ['#F59E0B'],
   fill: {
@@ -371,7 +385,7 @@ const temperatureChartOptions = computed(() => ({
   },
 }))
 
-const powerChartOptions = computed(() => ({
+const powerChartOptions = computed<ApexOptions>(() => ({
   ...chartOptions,
   colors: ['#8B5CF6'],
   fill: {
@@ -407,19 +421,18 @@ onMounted(() => {
     }
     
     // 更新图表数据（添加新数据点，移除旧数据点）
-    const now = new Date().getTime()
-    const newGpuData = gpuChartSeries.value[0].data.slice(-12)
+    const newGpuData = gpuSeriesData.value.slice(-12)
     newGpuData.push(device.value.utilization)
-    gpuChartSeries.value[0].data = newGpuData.slice(-13)
+    gpuSeriesData.value = newGpuData.slice(-13)
     
-    const newMemoryData = memoryChartSeries.value[0].data.slice(-12)
+    const newMemoryData = memorySeriesData.value.slice(-12)
     newMemoryData.push(device.value.memoryUsage)
-    memoryChartSeries.value[0].data = newMemoryData.slice(-13)
+    memorySeriesData.value = newMemoryData.slice(-13)
     
     if (device.value.temperature) {
-      const newTempData = temperatureChartSeries.value[0].data.slice(-12)
+      const newTempData = temperatureSeriesData.value.slice(-12)
       newTempData.push(device.value.temperature)
-      temperatureChartSeries.value[0].data = newTempData.slice(-13)
+      temperatureSeriesData.value = newTempData.slice(-13)
     }
   }, 2000)
 })
@@ -430,4 +443,3 @@ onUnmounted(() => {
   }
 })
 </script>
-

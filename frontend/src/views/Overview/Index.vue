@@ -448,18 +448,22 @@ const loadSystemData = async () => {
       memoryUsage.value = parseFloat(overview.memory.usage || '0')
       
       if (overview.disk && overview.disk.length > 0) {
-        const mainDisk = overview.disk[0]
-        diskUsage.value = mainDisk.use || 0
+        const [mainDisk] = overview.disk
+        if (mainDisk) {
+          diskUsage.value = mainDisk.use || 0
+        }
       }
 
       if (overview.network && overview.network.length > 0) {
-        const mainNetwork = overview.network[0]
-        const totalRx = mainNetwork.rx_sec || 0
-        const totalTx = mainNetwork.tx_sec || 0
-        const total = totalRx + totalTx
-        networkTraffic.value = formatBytes(total) + '/s'
-        networkUpload.value = formatBytes(totalTx) + '/s'
-        networkDownload.value = formatBytes(totalRx) + '/s'
+        const [mainNetwork] = overview.network
+        if (mainNetwork) {
+          const totalRx = mainNetwork.rx_sec || 0
+          const totalTx = mainNetwork.tx_sec || 0
+          const total = totalRx + totalTx
+          networkTraffic.value = formatBytes(total) + '/s'
+          networkUpload.value = formatBytes(totalTx) + '/s'
+          networkDownload.value = formatBytes(totalRx) + '/s'
+        }
       }
     } else if (systemInfoData.status === 'fulfilled' && metrics.status === 'fulfilled') {
       // Fallback: 使用单独获取的数据
@@ -476,18 +480,22 @@ const loadSystemData = async () => {
       memoryUsage.value = parseFloat(m.memory.usage || '0')
       
       if (systemInfoData.status === 'fulfilled' && systemInfoData.value.disk.length > 0) {
-        const mainDisk = systemInfoData.value.disk[0]
-        diskUsage.value = mainDisk.use || 0
+        const [mainDisk] = systemInfoData.value.disk
+        if (mainDisk) {
+          diskUsage.value = mainDisk.use || 0
+        }
       }
 
       if (m.network && m.network.length > 0) {
-        const mainNetwork = m.network[0]
-        const totalRx = mainNetwork.rx_sec || 0
-        const totalTx = mainNetwork.tx_sec || 0
-        const total = totalRx + totalTx
-        networkTraffic.value = formatBytes(total) + '/s'
-        networkUpload.value = formatBytes(totalTx) + '/s'
-        networkDownload.value = formatBytes(totalRx) + '/s'
+        const [mainNetwork] = m.network
+        if (mainNetwork) {
+          const totalRx = mainNetwork.rx_sec || 0
+          const totalTx = mainNetwork.tx_sec || 0
+          const total = totalRx + totalTx
+          networkTraffic.value = formatBytes(total) + '/s'
+          networkUpload.value = formatBytes(totalTx) + '/s'
+          networkDownload.value = formatBytes(totalRx) + '/s'
+        }
       }
     }
 

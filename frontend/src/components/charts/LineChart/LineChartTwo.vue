@@ -13,6 +13,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import type { ApexOptions } from 'apexcharts'
 import VueApexCharts from 'vue3-apexcharts'
 
 const series = ref([
@@ -26,7 +27,7 @@ const series = ref([
   },
 ])
 
-const chartOptions = ref({
+const chartOptions = ref<ApexOptions>({
   colors: ['#465FFF', '#9CB9FF'],
   chart: {
     fontFamily: 'Outfit, sans-serif',
@@ -42,7 +43,6 @@ const chartOptions = ref({
   },
   fill: {
     gradient: {
-      enabled: true,
       opacityFrom: 0.55,
       opacityTo: 0,
     },
@@ -53,10 +53,6 @@ const chartOptions = ref({
   },
   markers: {
     size: 0,
-  },
-  labels: {
-    show: false,
-    position: 'top',
   },
   grid: {
     xaxis: {

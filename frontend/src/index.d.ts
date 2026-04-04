@@ -1,1 +1,6 @@
 declare module 'jsvectormap'
+
+declare module '@novnc/novnc/lib/rfb' {
+  const RFB: any
+  export default RFB
+}

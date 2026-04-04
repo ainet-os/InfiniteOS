@@ -195,7 +195,7 @@ import type { SystemAlert } from '@/api/alerts'
 const dropdownOpen = ref(false)
 const loading = ref(false)
 const alerts = ref<SystemAlert[]>([])
-const dropdownRef = ref(null)
+const dropdownRef = ref<HTMLElement | null>(null)
 
 // 计算未读告警数量
 const unreadCount = computed(() => {

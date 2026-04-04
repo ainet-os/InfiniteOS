@@ -1,80 +1,156 @@
 <template>
   <AdminLayout>
     <div class="p-6">
-      <div class="mb-6 flex items-center justify-between">
+      <div class="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 class="text-2xl font-semibold text-gray-800 dark:text-white/90">{{ $t('pages.network.title') }}</h1>
-          <p class="text-gray-600 dark:text-gray-400 mt-1">{{ $t('pages.network.description') }}</p>
+          <p class="mt-1 text-gray-600 dark:text-gray-400">{{ $t('pages.network.description') }}</p>
         </div>
-        <button
-          @click="openCreateDialog"
-          class="px-4 py-2 bg-brand-500 text-white rounded-lg hover:bg-brand-600 dark:bg-brand-600 dark:hover:bg-brand-700 transition-colors"
-        >
-          <span class="flex items-center gap-2">
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-            </svg>
-            {{ $t('common.createNetwork') }}
-          </span>
-        </button>
+        <div class="flex flex-wrap items-center gap-3">
+          <button
+            class="rounded-lg bg-brand-500 px-4 py-2 text-white transition-colors hover:bg-brand-600 dark:bg-brand-600 dark:hover:bg-brand-700"
+            @click="openCreateDialog"
+          >
+            创建逻辑网络
+          </button>
+          <button
+            :disabled="pendingCount === 0"
+            class="rounded-lg bg-gray-100 px-4 py-2 text-gray-700 transition-colors hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+            @click="discardChanges"
+          >
+            放弃变更
+          </button>
+          <button
+            :disabled="pendingCount === 0 || applying"
+            class="rounded-lg bg-emerald-600 px-4 py-2 text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+            @click="applyChanges"
+          >
+            {{ applyButtonLabel }}
+          </button>
+        </div>
       </div>
 
-      <div class="rounded-lg bg-white dark:bg-white/[0.03] border border-gray-200 dark:border-gray-800 overflow-hidden">
+      <div class="mb-6 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800 dark:border-sky-500/20 dark:bg-sky-500/10 dark:text-sky-100">
+        物理网卡只允许编辑配置和启停，不允许删除。创建入口仅用于桥接、Bond、VLAN 等逻辑网络。所有创建、删除和 IP 修改都会先进入待应用队列，只有点击“应用配置”后才会真正写入 Netplan 并生效。
+      </div>
+
+      <div
+        v-if="pendingCount > 0"
+        class="mb-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-100"
+      >
+        当前有 {{ pendingCount }} 项待应用变更。保存草稿不会立即修改系统网络，点击右上角“应用配置”才会执行 Netplan 写入和 `netplan apply`。
+      </div>
+
+      <div class="overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
         <div class="p-6">
-          <div v-if="loading" class="text-center py-12">
+          <div v-if="loading" class="py-12 text-center">
             <p class="text-gray-600 dark:text-gray-400">{{ $t('common.loading') }}</p>
           </div>
-          <div v-else-if="interfaces.length === 0" class="text-center py-12">
+          <div v-else-if="displayInterfaces.length === 0" class="py-12 text-center">
             <p class="text-gray-600 dark:text-gray-400">{{ $t('common.noNetworkInterfaces') }}</p>
           </div>
           <table v-else class="w-full">
             <thead class="bg-gray-50 dark:bg-white/[0.02]">
               <tr>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-400 uppercase">{{ $t('common.interfaceName') }}</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-400 uppercase">{{ $t('common.ipAddress') }}</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-400 uppercase">{{ $t('common.status') }}</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-400 uppercase">{{ $t('common.type') }}</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-400 uppercase">{{ $t('common.actions') }}</th>
+                <th class="px-6 py-3 text-left text-xs font-medium uppercase text-gray-600 dark:text-gray-400">名称</th>
+                <th class="px-6 py-3 text-left text-xs font-medium uppercase text-gray-600 dark:text-gray-400">类别</th>
+                <th class="px-6 py-3 text-left text-xs font-medium uppercase text-gray-600 dark:text-gray-400">IP 地址</th>
+                <th class="px-6 py-3 text-left text-xs font-medium uppercase text-gray-600 dark:text-gray-400">状态</th>
+                <th class="px-6 py-3 text-left text-xs font-medium uppercase text-gray-600 dark:text-gray-400">管理方式</th>
+                <th class="px-6 py-3 text-left text-xs font-medium uppercase text-gray-600 dark:text-gray-400">操作</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-gray-200 dark:divide-gray-800">
-              <tr v-for="iface in interfaces" :key="iface.name" class="hover:bg-gray-50 dark:hover:bg-white/[0.02]">
-                <td class="px-6 py-4 text-sm text-gray-800 dark:text-white/90">{{ iface.name }}</td>
-                <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ iface.ip || '-' }}</td>
+              <tr
+                v-for="iface in displayInterfaces"
+                :key="iface.name"
+                :class="iface.pendingAction === 'delete' ? 'bg-red-50/40 dark:bg-red-500/5' : 'hover:bg-gray-50 dark:hover:bg-white/[0.02]'"
+              >
+                <td class="px-6 py-4 text-sm text-gray-800 dark:text-white/90">
+                  <div class="flex items-center gap-2">
+                    <span>{{ iface.name }}</span>
+                    <span
+                      v-if="iface.pendingAction"
+                      :class="[
+                        'rounded px-2 py-0.5 text-[11px] font-medium',
+                        iface.pendingAction === 'delete'
+                          ? 'bg-red-500/10 text-red-600 dark:text-red-300'
+                          : 'bg-amber-500/10 text-amber-700 dark:text-amber-200',
+                      ]"
+                    >
+                      {{ pendingActionLabel(iface.pendingAction) }}
+                    </span>
+                  </div>
+                  <p
+                    v-if="iface.type === 'bridge' || iface.type === 'bond'"
+                    class="mt-1 text-xs text-gray-500 dark:text-gray-400"
+                  >
+                    成员接口: {{ formatMemberNames(iface) }}
+                  </p>
+                </td>
+                <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
+                  <div class="flex items-center gap-2">
+                    <span>{{ typeLabel(iface.type) }}</span>
+                    <span
+                      class="rounded bg-gray-100 px-2 py-0.5 text-[11px] text-gray-600 dark:bg-gray-800 dark:text-gray-300"
+                    >
+                      {{ roleLabel(iface.role) }}
+                    </span>
+                  </div>
+                </td>
+                <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ iface.ip }}</td>
                 <td class="px-6 py-4">
-                  <span :class="[
-                    'px-2 py-1 text-xs rounded',
-                    iface.status === 'up' ? 'bg-success-500/10 text-success-500' : 'bg-gray-500/10 text-gray-500'
-                  ]">
+                  <span
+                    :class="[
+                      'rounded px-2 py-1 text-xs',
+                      iface.status === 'up' ? 'bg-success-500/10 text-success-500' : 'bg-gray-500/10 text-gray-500',
+                    ]"
+                  >
                     {{ iface.status }}
                   </span>
                 </td>
-                <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ iface.type }}</td>
+                <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
+                  {{ managementLabel(iface) }}
+                </td>
                 <td class="px-6 py-4">
-                  <div class="flex items-center gap-2">
+                  <div class="flex flex-wrap items-center gap-2">
                     <button
-                      @click="toggleInterfaceStatus(iface)"
+                      v-if="iface.editable && iface.pendingAction !== 'delete'"
+                      class="rounded bg-brand-500/10 px-3 py-1 text-xs text-brand-500 transition-colors hover:bg-brand-500/20"
+                      @click="openEditDialog(iface)"
+                    >
+                      编辑
+                    </button>
+                    <button
+                      v-if="iface.deletable"
                       :class="[
-                        'px-3 py-1 text-xs rounded transition-colors',
+                        'rounded px-3 py-1 text-xs transition-colors',
+                        iface.pendingAction === 'delete'
+                          ? 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700'
+                          : 'bg-danger-500/10 text-danger-500 hover:bg-danger-500/20',
+                      ]"
+                      @click="toggleDeleteDraft(iface)"
+                    >
+                      {{ iface.pendingAction === 'delete' ? '撤销删除' : '删除' }}
+                    </button>
+                    <button
+                      v-if="iface.role === 'physical' && iface.editable"
+                      :class="[
+                        'rounded px-3 py-1 text-xs transition-colors',
                         iface.status === 'up'
                           ? 'bg-warning-500/10 text-warning-500 hover:bg-warning-500/20'
-                          : 'bg-success-500/10 text-success-500 hover:bg-success-500/20'
+                          : 'bg-success-500/10 text-success-500 hover:bg-success-500/20',
                       ]"
+                      @click="toggleInterfaceStatus(iface)"
                     >
-                      {{ iface.status === 'up' ? $t('common.disable') : $t('common.enable') }}
+                      {{ iface.status === 'up' ? '禁用' : '启用' }}
                     </button>
-                    <button
-                      @click="openEditDialog(iface)"
-                      class="px-3 py-1 text-xs rounded bg-brand-500/10 text-brand-500 hover:bg-brand-500/20 transition-colors"
+                    <span
+                      v-if="!iface.editable && iface.role === 'physical'"
+                      class="text-xs text-gray-500 dark:text-gray-400"
                     >
-                      {{ $t('common.edit') }}
-                    </button>
-                    <button
-                      @click="openDeleteDialog(iface)"
-                      class="px-3 py-1 text-xs rounded bg-danger-500/10 text-danger-500 hover:bg-danger-500/20 transition-colors"
-                    >
-                      {{ $t('common.delete') }}
-                    </button>
+                      当前类型不支持编辑
+                    </span>
                   </div>
                 </td>
               </tr>
@@ -84,122 +160,160 @@
       </div>
     </div>
 
-    <!-- 创建网络对话框 -->
     <div
       v-if="showCreateDialog"
-      class="fixed inset-0 bg-black/50 flex items-center justify-center z-[100000]"
+      class="fixed inset-0 z-[100000] flex items-center justify-center bg-black/50"
       @click.self="closeCreateDialog"
     >
-      <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-md mx-4">
+      <div class="mx-4 w-full max-w-2xl rounded-lg bg-white shadow-xl dark:bg-gray-800">
         <div class="p-6">
-          <h2 class="text-xl font-semibold text-gray-800 dark:text-white/90 mb-4">创建网络连接</h2>
-          
-          <form @submit.prevent="handleCreate" class="space-y-4">
-            <div>
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                接口名称 <span class="text-danger-500">*</span>
-              </label>
-              <input
-                v-model="createForm.name"
-                type="text"
-                required
-                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white/90 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
-                placeholder="例如: eth0, ens33"
-              />
+          <h2 class="mb-4 text-xl font-semibold text-gray-800 dark:text-white/90">创建逻辑网络</h2>
+          <form class="space-y-4" @submit.prevent="stageCreate">
+            <div class="grid gap-4 md:grid-cols-2">
+              <div>
+                <label class="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">网络名称</label>
+                <input
+                  v-model="createForm.name"
+                  type="text"
+                  required
+                  class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-800 focus:border-transparent focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white/90"
+                  placeholder="例如: br0 / bond0 / vlan100"
+                />
+              </div>
+              <div>
+                <label class="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">网络类型</label>
+                <select
+                  v-model="createForm.type"
+                  class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-800 focus:border-transparent focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white/90"
+                  @change="onCreateTypeChange"
+                >
+                  <option value="bridge">桥接 (Bridge)</option>
+                  <option value="bond">Bond</option>
+                  <option value="vlan">VLAN</option>
+                </select>
+              </div>
             </div>
 
-            <div>
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                连接类型
+            <div v-if="createForm.type === 'bridge' || createForm.type === 'bond'">
+              <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                {{ createForm.type === 'bridge' ? '成员接口' : 'Bond 成员接口' }}
               </label>
+              <div class="grid gap-2 rounded-lg border border-gray-200 p-3 dark:border-gray-700 md:grid-cols-2">
+                <label
+                  v-for="option in memberOptions(createForm)"
+                  :key="`${createForm.type}-${option.name}`"
+                  class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300"
+                >
+                  <input
+                    :checked="createForm.interfaces.includes(option.name)"
+                    type="checkbox"
+                    class="rounded border-gray-300 text-brand-500 focus:ring-brand-500"
+                    @change="toggleFormMember(createForm, option.name)"
+                  />
+                  <span>{{ option.name }}</span>
+                  <span class="text-xs text-gray-500 dark:text-gray-400">{{ typeLabel(option.type) }}</span>
+                </label>
+              </div>
+            </div>
+
+            <div v-if="createForm.type === 'bond'">
+              <label class="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Bond 模式</label>
               <select
-                v-model="createForm.type"
-                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white/90 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+                v-model="createForm.bondMode"
+                class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-800 focus:border-transparent focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white/90"
               >
-                <option value="ethernet">以太网</option>
-                <option value="wifi">WiFi</option>
-                <option value="bridge">网桥</option>
-                <option value="bond">绑定</option>
+                <option value="active-backup">active-backup</option>
+                <option value="802.3ad">802.3ad</option>
+                <option value="balance-rr">balance-rr</option>
+                <option value="balance-xor">balance-xor</option>
               </select>
             </div>
 
-            <div>
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                配置方式
-              </label>
-              <select
-                v-model="createForm.method"
-                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white/90 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
-                @change="onMethodChange"
-              >
-                <option value="auto">自动 (DHCP)</option>
-                <option value="static">静态 IP</option>
-              </select>
+            <div v-if="createForm.type === 'vlan'" class="grid gap-4 md:grid-cols-2">
+              <div>
+                <label class="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">父接口</label>
+                <select
+                  v-model="createForm.link"
+                  class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-800 focus:border-transparent focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white/90"
+                >
+                  <option value="" disabled>请选择父接口</option>
+                  <option v-for="option in vlanParentOptions" :key="option.name" :value="option.name">
+                    {{ option.name }} ({{ typeLabel(option.type) }})
+                  </option>
+                </select>
+              </div>
+              <div>
+                <label class="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">VLAN ID</label>
+                <input
+                  v-model="createForm.vlanId"
+                  type="number"
+                  min="1"
+                  max="4094"
+                  class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-800 focus:border-transparent focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white/90"
+                />
+              </div>
             </div>
 
-            <div v-if="createForm.method === 'static'">
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                IP 地址 <span class="text-danger-500">*</span>
-              </label>
-              <input
-                v-model="createForm.ip4"
-                type="text"
-                :required="createForm.method === 'static'"
-                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white/90 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
-                placeholder="例如: 192.168.1.100/24"
-              />
+            <div class="grid gap-4 md:grid-cols-2">
+              <div>
+                <label class="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">配置方式</label>
+                <select
+                  v-model="createForm.method"
+                  class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-800 focus:border-transparent focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white/90"
+                  @change="onMethodChange(createForm)"
+                >
+                  <option value="auto">自动 (DHCP)</option>
+                  <option value="static">静态 IP</option>
+                </select>
+              </div>
             </div>
 
-            <div v-if="createForm.method === 'static'">
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                网关
-              </label>
-              <input
-                v-model="createForm.gateway"
-                type="text"
-                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white/90 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
-                placeholder="例如: 192.168.1.1"
-              />
-            </div>
-
-            <div v-if="createForm.method === 'static'">
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                DNS 服务器（逗号分隔）
-              </label>
-              <input
-                v-model="createForm.dnsStr"
-                type="text"
-                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white/90 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
-                placeholder="例如: 8.8.8.8, 8.8.4.4"
-              />
-            </div>
-
-            <div>
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                MAC 地址
-              </label>
-              <input
-                v-model="createForm.mac"
-                type="text"
-                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white/90 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
-                placeholder="例如: 00:11:22:33:44:55"
-              />
-            </div>
+            <template v-if="createForm.method === 'static'">
+              <div class="grid gap-4 md:grid-cols-2">
+                <div>
+                  <label class="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">IP 地址</label>
+                  <input
+                    v-model="createForm.ip4"
+                    type="text"
+                    required
+                    class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-800 focus:border-transparent focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white/90"
+                    placeholder="例如: 192.168.1.100/24"
+                  />
+                </div>
+                <div>
+                  <label class="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">网关</label>
+                  <input
+                    v-model="createForm.gateway"
+                    type="text"
+                    class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-800 focus:border-transparent focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white/90"
+                    placeholder="例如: 192.168.1.1"
+                  />
+                </div>
+              </div>
+              <div>
+                <label class="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">DNS 服务器（逗号分隔）</label>
+                <input
+                  v-model="createForm.dnsStr"
+                  type="text"
+                  class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-800 focus:border-transparent focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white/90"
+                  placeholder="例如: 223.5.5.5, 8.8.8.8"
+                />
+              </div>
+            </template>
 
             <div class="flex justify-end gap-3 pt-4">
               <button
                 type="button"
+                class="rounded-lg bg-gray-100 px-4 py-2 text-gray-700 transition-colors hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
                 @click="closeCreateDialog"
-                class="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
               >
                 取消
               </button>
               <button
                 type="submit"
-                :disabled="creating"
-                class="px-4 py-2 bg-brand-500 text-white rounded-lg hover:bg-brand-600 dark:bg-brand-600 dark:hover:bg-brand-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                class="rounded-lg bg-brand-500 px-4 py-2 text-white transition-colors hover:bg-brand-600 dark:bg-brand-600 dark:hover:bg-brand-700"
               >
-                {{ creating ? '创建中...' : '创建' }}
+                保存变更
               </button>
             </div>
           </form>
@@ -207,128 +321,158 @@
       </div>
     </div>
 
-    <!-- 编辑网络对话框 -->
     <div
       v-if="showEditDialog"
-      class="fixed inset-0 bg-black/50 flex items-center justify-center z-[100000]"
+      class="fixed inset-0 z-[100000] flex items-center justify-center bg-black/50"
       @click.self="closeEditDialog"
     >
-      <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-md mx-4">
+      <div class="mx-4 w-full max-w-2xl rounded-lg bg-white shadow-xl dark:bg-gray-800">
         <div class="p-6">
-          <h2 class="text-xl font-semibold text-gray-800 dark:text-white/90 mb-4">编辑网络连接</h2>
-          
-          <form @submit.prevent="handleUpdate" class="space-y-4">
-            <div>
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                接口名称
+          <h2 class="mb-4 text-xl font-semibold text-gray-800 dark:text-white/90">编辑网络配置</h2>
+
+          <form class="space-y-4" @submit.prevent="stageEdit">
+            <div class="grid gap-4 md:grid-cols-2">
+              <div>
+                <label class="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">网络名称</label>
+                <input
+                  :value="editForm.name"
+                  type="text"
+                  disabled
+                  class="w-full cursor-not-allowed rounded-lg border border-gray-300 bg-gray-100 px-3 py-2 text-gray-600 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-400"
+                />
+              </div>
+              <div>
+                <label class="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">网络类型</label>
+                <input
+                  :value="typeLabel(editForm.type)"
+                  type="text"
+                  disabled
+                  class="w-full cursor-not-allowed rounded-lg border border-gray-300 bg-gray-100 px-3 py-2 text-gray-600 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-400"
+                />
+              </div>
+            </div>
+
+            <div v-if="editForm.type === 'bridge' || editForm.type === 'bond'">
+              <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                {{ editForm.type === 'bridge' ? '成员接口' : 'Bond 成员接口' }}
               </label>
-              <input
-                :value="editForm.name"
-                type="text"
-                disabled
-                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 cursor-not-allowed"
-              />
+              <div class="grid gap-2 rounded-lg border border-gray-200 p-3 dark:border-gray-700 md:grid-cols-2">
+                <label
+                  v-for="option in memberOptions(editForm)"
+                  :key="`${editForm.type}-${option.name}`"
+                  class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300"
+                >
+                  <input
+                    :checked="editForm.interfaces.includes(option.name)"
+                    type="checkbox"
+                    class="rounded border-gray-300 text-brand-500 focus:ring-brand-500"
+                    @change="toggleFormMember(editForm, option.name)"
+                  />
+                  <span>{{ option.name }}</span>
+                  <span class="text-xs text-gray-500 dark:text-gray-400">{{ typeLabel(option.type) }}</span>
+                </label>
+              </div>
+            </div>
+
+            <div v-if="editForm.type === 'bond'">
+              <label class="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Bond 模式</label>
+              <select
+                v-model="editForm.bondMode"
+                class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-800 focus:border-transparent focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white/90"
+              >
+                <option value="active-backup">active-backup</option>
+                <option value="802.3ad">802.3ad</option>
+                <option value="balance-rr">balance-rr</option>
+                <option value="balance-xor">balance-xor</option>
+              </select>
+            </div>
+
+            <div v-if="editForm.type === 'vlan'" class="grid gap-4 md:grid-cols-2">
+              <div>
+                <label class="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">父接口</label>
+                <select
+                  v-model="editForm.link"
+                  class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-800 focus:border-transparent focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white/90"
+                >
+                  <option value="" disabled>请选择父接口</option>
+                  <option v-for="option in vlanParentOptions" :key="option.name" :value="option.name">
+                    {{ option.name }} ({{ typeLabel(option.type) }})
+                  </option>
+                </select>
+              </div>
+              <div>
+                <label class="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">VLAN ID</label>
+                <input
+                  v-model="editForm.vlanId"
+                  type="number"
+                  min="1"
+                  max="4094"
+                  class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-800 focus:border-transparent focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white/90"
+                />
+              </div>
             </div>
 
             <div>
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                配置方式
-              </label>
+              <label class="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">配置方式</label>
               <select
                 v-model="editForm.method"
-                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white/90 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
-                @change="onEditMethodChange"
+                class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-800 focus:border-transparent focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white/90"
+                @change="onMethodChange(editForm)"
               >
                 <option value="auto">自动 (DHCP)</option>
                 <option value="static">静态 IP</option>
               </select>
             </div>
 
-            <div v-if="editForm.method === 'static'">
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                IP 地址 <span class="text-danger-500">*</span>
-              </label>
-              <input
-                v-model="editForm.ip4"
-                type="text"
-                :required="editForm.method === 'static'"
-                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white/90 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
-                placeholder="例如: 192.168.1.100/24"
-              />
-            </div>
-
-            <div v-if="editForm.method === 'static'">
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                网关
-              </label>
-              <input
-                v-model="editForm.gateway"
-                type="text"
-                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white/90 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
-                placeholder="例如: 192.168.1.1"
-              />
-            </div>
-
-            <div v-if="editForm.method === 'static'">
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                DNS 服务器（逗号分隔）
-              </label>
-              <input
-                v-model="editForm.dnsStr"
-                type="text"
-                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-white/90 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
-                placeholder="例如: 8.8.8.8, 8.8.4.4"
-              />
-            </div>
+            <template v-if="editForm.method === 'static'">
+              <div class="grid gap-4 md:grid-cols-2">
+                <div>
+                  <label class="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">IP 地址</label>
+                  <input
+                    v-model="editForm.ip4"
+                    type="text"
+                    required
+                    class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-800 focus:border-transparent focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white/90"
+                    placeholder="例如: 192.168.1.100/24"
+                  />
+                </div>
+                <div>
+                  <label class="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">网关</label>
+                  <input
+                    v-model="editForm.gateway"
+                    type="text"
+                    class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-800 focus:border-transparent focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white/90"
+                    placeholder="例如: 192.168.1.1"
+                  />
+                </div>
+              </div>
+              <div>
+                <label class="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">DNS 服务器（逗号分隔）</label>
+                <input
+                  v-model="editForm.dnsStr"
+                  type="text"
+                  class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-800 focus:border-transparent focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white/90"
+                  placeholder="例如: 223.5.5.5, 8.8.8.8"
+                />
+              </div>
+            </template>
 
             <div class="flex justify-end gap-3 pt-4">
               <button
                 type="button"
+                class="rounded-lg bg-gray-100 px-4 py-2 text-gray-700 transition-colors hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
                 @click="closeEditDialog"
-                class="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
               >
                 取消
               </button>
               <button
                 type="submit"
-                :disabled="updating"
-                class="px-4 py-2 bg-brand-500 text-white rounded-lg hover:bg-brand-600 dark:bg-brand-600 dark:hover:bg-brand-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                class="rounded-lg bg-brand-500 px-4 py-2 text-white transition-colors hover:bg-brand-600 dark:bg-brand-600 dark:hover:bg-brand-700"
               >
-                {{ updating ? '更新中...' : '更新' }}
+                保存变更
               </button>
             </div>
           </form>
-        </div>
-      </div>
-    </div>
-
-    <!-- 删除确认对话框 -->
-    <div
-      v-if="showDeleteDialog"
-      class="fixed inset-0 bg-black/50 flex items-center justify-center z-[100000]"
-      @click.self="closeDeleteDialog"
-    >
-      <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-md mx-4">
-        <div class="p-6">
-          <h2 class="text-xl font-semibold text-gray-800 dark:text-white/90 mb-4">删除网络连接</h2>
-          <p class="text-gray-600 dark:text-gray-400 mb-6">
-            确定要删除网络连接 <strong>{{ deleteTarget?.name }}</strong> 吗？此操作不可恢复。
-          </p>
-          <div class="flex justify-end gap-3">
-            <button
-              @click="closeDeleteDialog"
-              class="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
-            >
-              取消
-            </button>
-            <button
-              @click="handleDelete"
-              :disabled="deleting"
-              class="px-4 py-2 bg-danger-500 text-white rounded-lg hover:bg-danger-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {{ deleting ? '删除中...' : '删除' }}
-            </button>
-          </div>
         </div>
       </div>
     </div>
@@ -337,60 +481,349 @@
 
 <script setup lang="ts">
 import AdminLayout from '@/components/layout/AdminLayout.vue'
-import { ref, onMounted, onUnmounted } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { networkApi } from '@/api/network'
-import type { NetworkInterface, NetworkInterfaceDetails } from '@/api/network'
+import type {
+  ApplyNetworkOperation,
+  NetworkDeviceType,
+  NetworkInterface,
+  NetworkInterfaceDetails,
+} from '@/api/network'
+
+type DraftAction = 'create' | 'update' | 'delete'
+
+type DisplayInterface = NetworkInterface & {
+  ip: string
+  pendingAction: DraftAction | null
+}
+
+type NetworkForm = {
+  name: string
+  type: 'ethernet' | 'bridge' | 'bond' | 'vlan'
+  method: 'auto' | 'static'
+  ip4: string
+  gateway: string
+  dnsStr: string
+  interfaces: string[]
+  link: string
+  vlanId: string
+  bondMode: string
+}
 
 const { t: $t } = useI18n()
 const loading = ref(false)
-const interfaces = ref<NetworkInterface[]>([])
-
-// 对话框状态
+const applying = ref(false)
+const rawInterfaces = ref<NetworkInterface[]>([])
+const drafts = ref<Record<string, ApplyNetworkOperation>>({})
 const showCreateDialog = ref(false)
 const showEditDialog = ref(false)
-const showDeleteDialog = ref(false)
 
-// 表单数据
-const createForm = ref({
-  name: '',
-  type: 'ethernet',
-  method: 'auto' as 'auto' | 'static',
-  ip4: '',
-  gateway: '',
-  dnsStr: '',
-  mac: '',
-})
-
-const editForm = ref({
-  name: '',
-  method: 'auto' as 'auto' | 'static',
-  ip4: '',
-  gateway: '',
-  dnsStr: '',
-})
-
-const deleteTarget = ref<NetworkInterface | null>(null)
-
-// 操作状态
-const creating = ref(false)
-const updating = ref(false)
-const deleting = ref(false)
+const createForm = ref<NetworkForm>(createEmptyForm('bridge'))
+const editForm = ref<NetworkForm>(createEmptyForm('ethernet'))
 
 let refreshInterval: number | undefined
 
-// 加载网络接口
-const loadInterfaces = async () => {
-  loading.value = true
-  try {
-    const data = await networkApi.getInterfaces()
-    interfaces.value = (data || []).map(iface => ({
+function createEmptyForm(type: NetworkForm['type']): NetworkForm {
+  return {
+    name: '',
+    type,
+    method: 'auto',
+    ip4: '',
+    gateway: '',
+    dnsStr: '',
+    interfaces: [],
+    link: '',
+    vlanId: '',
+    bondMode: 'active-backup',
+  }
+}
+
+function typeLabel(type: NetworkDeviceType | NetworkForm['type']) {
+  switch (type) {
+    case 'ethernet':
+      return '以太网'
+    case 'bridge':
+      return '桥接'
+    case 'bond':
+      return 'Bond'
+    case 'vlan':
+      return 'VLAN'
+    case 'wifi':
+      return 'Wi-Fi'
+    default:
+      return '其他'
+  }
+}
+
+function pendingActionLabel(action: DraftAction) {
+  if (action === 'create') return '待创建'
+  if (action === 'delete') return '待删除'
+  return '待应用'
+}
+
+function roleLabel(role: DisplayInterface['role']) {
+  if (role === 'physical') return '物理'
+  if (role === 'logical') return '逻辑'
+  return '系统'
+}
+
+function roleRank(role: DisplayInterface['role']) {
+  if (role === 'physical') return 0
+  if (role === 'logical') return 1
+  return 2
+}
+
+function managementLabel(iface: DisplayInterface) {
+  if (iface.managed) return '页面管理'
+  if (iface.role === 'physical') return '物理网卡'
+  if (iface.role === 'logical') return '外部配置'
+  return '系统接口'
+}
+
+function formatMemberNames(iface: Pick<DisplayInterface, 'interfaces'>) {
+  const members = iface.interfaces?.filter(Boolean) || []
+  return members.length > 0 ? members.join(', ') : '-'
+}
+
+function parseDnsString(value: string) {
+  return value
+    .split(',')
+    .map(item => item.trim())
+    .filter(Boolean)
+}
+
+function buildOperationFromForm(form: NetworkForm): ApplyNetworkOperation {
+  const config: ApplyNetworkOperation['config'] = {
+    method: form.method,
+  }
+
+  if (form.method === 'static') {
+    config.ip4 = form.ip4
+    config.gateway = form.gateway || undefined
+    const dns = parseDnsString(form.dnsStr)
+    if (dns.length > 0) {
+      config.dns = dns
+    }
+  }
+
+  if (form.type === 'bridge' || form.type === 'bond') {
+    config.interfaces = [...form.interfaces]
+  }
+
+  if (form.type === 'bond') {
+    config.bondMode = form.bondMode
+  }
+
+  if (form.type === 'vlan') {
+    config.link = form.link
+    config.vlanId = form.vlanId ? Number(form.vlanId) : undefined
+  }
+
+  return {
+    action: 'upsert',
+    targetType: form.type,
+    name: form.name.trim(),
+    config,
+  }
+}
+
+function getPendingAction(name: string): DraftAction | null {
+  const operation = drafts.value[name]
+  if (!operation) return null
+
+  if (operation.action === 'delete') return 'delete'
+  return rawInterfaces.value.some(item => item.name === name) ? 'update' : 'create'
+}
+
+function previewInterface(base: NetworkInterface | undefined, operation: ApplyNetworkOperation): DisplayInterface {
+  const type = operation.targetType
+  const method = operation.config?.method || 'auto'
+  const ip4 = method === 'static' ? operation.config?.ip4 || '' : ''
+
+  return {
+    name: operation.name,
+    type,
+    role: type === 'ethernet' ? 'physical' : 'logical',
+    managed: true,
+    editable: true,
+    deletable: type !== 'ethernet',
+    mac: base?.mac || '',
+    ip4,
+    ip6: base?.ip6 || '',
+    status: base?.status || 'down',
+    speed: base?.speed || 0,
+    rx_bytes: base?.rx_bytes || 0,
+    tx_bytes: base?.tx_bytes || 0,
+    rx_sec: base?.rx_sec || 0,
+    tx_sec: base?.tx_sec || 0,
+    interfaces: operation.config?.interfaces || base?.interfaces || [],
+    link: operation.config?.link || base?.link || '',
+    vlanId: operation.config?.vlanId ?? base?.vlanId,
+    bondMode: operation.config?.bondMode || base?.bondMode,
+    ip: ip4 || base?.ip4 || base?.ip6 || '-',
+    pendingAction: getPendingAction(operation.name),
+  }
+}
+
+function getBridgeBondMemberNames(interfaces: Iterable<DisplayInterface>) {
+  const memberNames = new Set<string>()
+
+  for (const iface of interfaces) {
+    if (!['bridge', 'bond'].includes(iface.type)) continue
+
+    for (const member of iface.interfaces || []) {
+      memberNames.add(member)
+    }
+  }
+
+  return memberNames
+}
+
+const displayInterfaces = computed<DisplayInterface[]>(() => {
+  const orderedNames: string[] = []
+  const map = new Map<string, DisplayInterface>()
+
+  for (const iface of rawInterfaces.value) {
+    orderedNames.push(iface.name)
+    map.set(iface.name, {
       ...iface,
       ip: iface.ip4 || iface.ip6 || '-',
-    }))
+      pendingAction: null,
+    })
+  }
+
+  for (const operation of Object.values(drafts.value)) {
+    const existing = map.get(operation.name)
+
+    if (operation.action === 'delete') {
+      if (existing) {
+        existing.pendingAction = 'delete'
+      }
+      continue
+    }
+
+    const preview = previewInterface(existing, operation)
+    if (!existing) {
+      orderedNames.push(operation.name)
+    }
+    map.set(operation.name, preview)
+  }
+
+  const bridgeBondMemberNames = getBridgeBondMemberNames(
+    Array.from(map.values()).filter(iface => iface.pendingAction !== 'delete')
+  )
+
+  return orderedNames
+    .filter((name, index) => orderedNames.indexOf(name) === index)
+    .map(name => {
+      const iface = map.get(name)
+      if (!iface) return undefined
+
+      if (iface.type === 'ethernet' && bridgeBondMemberNames.has(iface.name)) {
+        return {
+          ...iface,
+          ip4: '',
+          ip6: '',
+          ip: '-',
+        }
+      }
+
+      return iface
+    })
+    .filter((item): item is DisplayInterface => Boolean(item))
+    .sort((left, right) => {
+      if (left.role !== right.role) {
+        return roleRank(left.role) - roleRank(right.role)
+      }
+      return left.name.localeCompare(right.name)
+    })
+})
+
+const pendingCount = computed(() => Object.keys(drafts.value).length)
+const applyButtonLabel = computed(() => (
+  applying.value ? '应用中...' : `应用配置${pendingCount.value > 0 ? ` (${pendingCount.value})` : ''}`
+))
+
+const bridgeBondMemberNames = computed(() => (
+  getBridgeBondMemberNames(displayInterfaces.value.filter(iface => iface.pendingAction !== 'delete'))
+))
+const editableInterfaces = computed(() => displayInterfaces.value.filter(iface => iface.pendingAction !== 'delete'))
+
+const memberOwners = computed(() => {
+  const owners = new Map<string, Set<string>>()
+
+  for (const iface of editableInterfaces.value) {
+    if (!['bridge', 'bond'].includes(iface.type)) continue
+
+    for (const member of iface.interfaces || []) {
+      if (!owners.has(member)) {
+        owners.set(member, new Set())
+      }
+      owners.get(member)?.add(iface.name)
+    }
+  }
+
+  return owners
+})
+
+const vlanParentOptions = computed(() => (
+  editableInterfaces.value.filter(iface => ['ethernet', 'bond'].includes(iface.type))
+))
+
+function canUseMember(candidateName: string, currentName: string, selectedMembers: Set<string>) {
+  if (selectedMembers.has(candidateName)) return true
+
+  const owners = memberOwners.value.get(candidateName)
+  if (!owners || owners.size === 0) return true
+
+  return Array.from(owners).every(owner => owner === currentName)
+}
+
+function memberOptions(form: NetworkForm) {
+  const currentName = form.name.trim()
+  const selectedMembers = new Set(form.interfaces)
+  const allowedTypes = form.type === 'bond'
+    ? ['ethernet']
+    : ['ethernet', 'bond', 'vlan']
+
+  return editableInterfaces.value.filter(iface => (
+    allowedTypes.includes(iface.type)
+    && canUseMember(iface.name, currentName, selectedMembers)
+  ))
+}
+
+function onMethodChange(form: NetworkForm) {
+  if (form.method === 'auto') {
+    form.ip4 = ''
+    form.gateway = ''
+    form.dnsStr = ''
+  }
+}
+
+function onCreateTypeChange() {
+  createForm.value.interfaces = []
+  createForm.value.link = ''
+  createForm.value.vlanId = ''
+  createForm.value.bondMode = 'active-backup'
+}
+
+function toggleFormMember(form: NetworkForm, memberName: string) {
+  if (form.interfaces.includes(memberName)) {
+    form.interfaces = form.interfaces.filter(item => item !== memberName)
+    return
+  }
+
+  form.interfaces = [...form.interfaces, memberName]
+}
+
+async function loadInterfaces() {
+  loading.value = true
+  try {
+    rawInterfaces.value = await networkApi.getInterfaces()
   } catch (error: any) {
     console.error('获取网络接口失败:', error)
-    interfaces.value = []
+    rawInterfaces.value = []
     if (error?.error?.includes('未提供认证令牌') || error?.error?.includes('无效的认证令牌')) {
       return
     }
@@ -399,35 +832,50 @@ const loadInterfaces = async () => {
   }
 }
 
-// 打开创建对话框
-const openCreateDialog = () => {
-  createForm.value = {
-    name: '',
-    type: 'ethernet',
-    method: 'auto',
-    ip4: '',
-    gateway: '',
-    dnsStr: '',
-    mac: '',
-  }
+function openCreateDialog() {
+  createForm.value = createEmptyForm('bridge')
   showCreateDialog.value = true
 }
 
-// 关闭创建对话框
-const closeCreateDialog = () => {
+function closeCreateDialog() {
   showCreateDialog.value = false
 }
 
-// 打开编辑对话框
-const openEditDialog = async (iface: NetworkInterface) => {
+function closeEditDialog() {
+  showEditDialog.value = false
+}
+
+function stageCreate() {
+  const operation = buildOperationFromForm(createForm.value)
+  drafts.value = {
+    ...drafts.value,
+    [operation.name]: operation,
+  }
+  closeCreateDialog()
+}
+
+async function openEditDialog(iface: DisplayInterface) {
   try {
+    const draft = drafts.value[iface.name]
+    if (draft && draft.action === 'upsert') {
+      editForm.value = formFromOperation(draft)
+      showEditDialog.value = true
+      return
+    }
+
     const details = await networkApi.getInterfaceDetails(iface.name)
+    const isBridgeOrBondMember = details.type === 'ethernet' && bridgeBondMemberNames.value.has(details.name)
     editForm.value = {
       name: details.name,
-      method: details.method === 'dhcp' ? 'auto' : details.method,
-      ip4: details.ip4 || '',
-      gateway: details.gateway || '',
-      dnsStr: details.dns.join(', ') || '',
+      type: details.type === 'wifi' || details.type === 'other' ? 'ethernet' : details.type,
+      method: isBridgeOrBondMember ? 'auto' : details.method,
+      ip4: isBridgeOrBondMember ? '' : details.ip4 || '',
+      gateway: isBridgeOrBondMember ? '' : details.gateway || '',
+      dnsStr: isBridgeOrBondMember ? '' : details.dns.join(', '),
+      interfaces: details.interfaces || [],
+      link: details.link || '',
+      vlanId: details.vlanId ? String(details.vlanId) : '',
+      bondMode: details.bondMode || 'active-backup',
     }
     showEditDialog.value = true
   } catch (error: any) {
@@ -436,115 +884,82 @@ const openEditDialog = async (iface: NetworkInterface) => {
   }
 }
 
-// 关闭编辑对话框
-const closeEditDialog = () => {
-  showEditDialog.value = false
-}
-
-// 打开删除对话框
-const openDeleteDialog = (iface: NetworkInterface) => {
-  deleteTarget.value = iface
-  showDeleteDialog.value = true
-}
-
-// 关闭删除对话框
-const closeDeleteDialog = () => {
-  showDeleteDialog.value = false
-  deleteTarget.value = null
-}
-
-// 配置方式改变
-const onMethodChange = () => {
-  if (createForm.value.method === 'auto') {
-    createForm.value.ip4 = ''
-    createForm.value.gateway = ''
-    createForm.value.dnsStr = ''
+function formFromOperation(operation: ApplyNetworkOperation): NetworkForm {
+  return {
+    name: operation.name,
+    type: operation.targetType,
+    method: operation.config?.method || 'auto',
+    ip4: operation.config?.ip4 || '',
+    gateway: operation.config?.gateway || '',
+    dnsStr: (operation.config?.dns || []).join(', '),
+    interfaces: [...(operation.config?.interfaces || [])],
+    link: operation.config?.link || '',
+    vlanId: operation.config?.vlanId ? String(operation.config.vlanId) : '',
+    bondMode: operation.config?.bondMode || 'active-backup',
   }
 }
 
-const onEditMethodChange = () => {
-  if (editForm.value.method === 'auto') {
-    editForm.value.ip4 = ''
-    editForm.value.gateway = ''
-    editForm.value.dnsStr = ''
+function stageEdit() {
+  const operation = buildOperationFromForm(editForm.value)
+  drafts.value = {
+    ...drafts.value,
+    [operation.name]: operation,
+  }
+  closeEditDialog()
+}
+
+function toggleDeleteDraft(iface: DisplayInterface) {
+  const currentDraft = drafts.value[iface.name]
+
+  if (currentDraft?.action === 'delete') {
+    const nextDrafts = { ...drafts.value }
+    delete nextDrafts[iface.name]
+    drafts.value = nextDrafts
+    return
+  }
+
+  if (currentDraft?.action === 'upsert' && !rawInterfaces.value.some(item => item.name === iface.name)) {
+    const nextDrafts = { ...drafts.value }
+    delete nextDrafts[iface.name]
+    drafts.value = nextDrafts
+    return
+  }
+
+  drafts.value = {
+    ...drafts.value,
+    [iface.name]: {
+      action: 'delete',
+      targetType: iface.type as 'bridge' | 'bond' | 'vlan',
+      name: iface.name,
+    },
   }
 }
 
-// 创建网络连接
-const handleCreate = async () => {
-  creating.value = true
+function discardChanges() {
+  drafts.value = {}
+  closeCreateDialog()
+  closeEditDialog()
+}
+
+async function applyChanges() {
+  if (pendingCount.value === 0) return
+
+  applying.value = true
   try {
-    const dns = createForm.value.dnsStr
-      ? createForm.value.dnsStr.split(',').map(d => d.trim()).filter(d => d)
-      : []
-
-    await networkApi.createInterface({
-      name: createForm.value.name,
-      type: createForm.value.type,
-      method: createForm.value.method,
-      ip4: createForm.value.method === 'static' ? createForm.value.ip4 : undefined,
-      gateway: createForm.value.method === 'static' ? createForm.value.gateway : undefined,
-      dns: createForm.value.method === 'static' && dns.length > 0 ? dns : undefined,
-      mac: createForm.value.mac || undefined,
-    })
-
-    alert('网络连接创建成功')
-    closeCreateDialog()
+    const operations = Object.values(drafts.value)
+    await networkApi.applyChanges(operations)
+    drafts.value = {}
     await loadInterfaces()
+    alert('网络配置已应用')
   } catch (error: any) {
-    console.error('创建网络连接失败:', error)
-    alert(error?.error || '创建网络连接失败')
+    console.error('应用网络配置失败:', error)
+    alert(error?.error || '应用网络配置失败')
   } finally {
-    creating.value = false
+    applying.value = false
   }
 }
 
-// 更新网络连接
-const handleUpdate = async () => {
-  updating.value = true
-  try {
-    const dns = editForm.value.dnsStr
-      ? editForm.value.dnsStr.split(',').map(d => d.trim()).filter(d => d)
-      : []
-
-    await networkApi.updateInterface(editForm.value.name, {
-      method: editForm.value.method,
-      ip4: editForm.value.method === 'static' ? editForm.value.ip4 : undefined,
-      gateway: editForm.value.method === 'static' ? editForm.value.gateway : undefined,
-      dns: editForm.value.method === 'static' && dns.length > 0 ? dns : undefined,
-    })
-
-    alert('网络连接更新成功')
-    closeEditDialog()
-    await loadInterfaces()
-  } catch (error: any) {
-    console.error('更新网络连接失败:', error)
-    alert(error?.error || '更新网络连接失败')
-  } finally {
-    updating.value = false
-  }
-}
-
-// 删除网络连接
-const handleDelete = async () => {
-  if (!deleteTarget.value) return
-
-  deleting.value = true
-  try {
-    await networkApi.deleteInterface(deleteTarget.value.name)
-    alert('网络连接删除成功')
-    closeDeleteDialog()
-    await loadInterfaces()
-  } catch (error: any) {
-    console.error('删除网络连接失败:', error)
-    alert(error?.error || '删除网络连接失败')
-  } finally {
-    deleting.value = false
-  }
-}
-
-// 切换网络接口状态
-const toggleInterfaceStatus = async (iface: NetworkInterface) => {
+async function toggleInterfaceStatus(iface: DisplayInterface) {
   try {
     const enable = iface.status !== 'up'
     await networkApi.toggleInterface(iface.name, enable)
@@ -557,7 +972,7 @@ const toggleInterfaceStatus = async (iface: NetworkInterface) => {
 
 onMounted(() => {
   loadInterfaces()
-  
+
   refreshInterval = setInterval(() => {
     loadInterfaces()
   }, 30000) as unknown as number

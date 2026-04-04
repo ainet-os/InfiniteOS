@@ -27,23 +27,23 @@
               <td class="px-6 py-4">
                 <span :class="[
                   'px-2 py-1 text-xs rounded',
-                  service.status === 'active' ? 'bg-success-500/10 text-success-500' : 'bg-gray-500/10 text-gray-500'
+                  service.status === 'running' ? 'bg-success-500/10 text-success-500' : 'bg-gray-500/10 text-gray-500'
                 ]">
-                  {{ service.status }}
+                  {{ service.status === 'running' ? $t('common.running') : $t('common.stopped') }}
                 </span>
               </td>
               <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ service.description || '-' }}</td>
               <td class="px-6 py-4 text-sm">
                 <div class="flex gap-2">
                   <button
-                    v-if="service.status !== 'active'"
+                    v-if="service.status !== 'running'"
                     @click="startService(service.name)"
                     class="px-2.5 py-1.5 text-xs bg-success-600 dark:bg-success-500 text-white rounded hover:bg-success-700 dark:hover:bg-success-600 transition-colors"
                   >
                     {{ $t('common.start') }}
                   </button>
                   <button
-                    v-if="service.status === 'active'"
+                    v-if="service.status === 'running'"
                     @click="stopService(service.name)"
                     class="px-2.5 py-1.5 text-xs bg-error-600 dark:bg-error-500 text-white rounded hover:bg-error-700 dark:hover:bg-error-600 transition-colors"
                   >
@@ -193,10 +193,7 @@ const loadServices = async () => {
   loading.value = true
   try {
     const data = await servicesApi.getServices()
-    services.value = (data || []).map(s => ({
-      ...s,
-      status: s.status === 'running' ? 'active' : 'inactive',
-    }))
+    services.value = data || []
   } catch (error: any) {
     console.error('获取服务列表失败:', error)
     services.value = []
@@ -303,4 +300,3 @@ onUnmounted(() => {
   }
 })
 </script>
-

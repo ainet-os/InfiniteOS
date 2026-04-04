@@ -865,16 +865,34 @@ import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AdminLayout from '@/components/layout/AdminLayout.vue'
 import { modelsApi } from '@/api/models'
-import type { Model, ModelListItem } from '@/api/models'
+import type { DeployModelRequest, Model, ModelConfig, ModelListItem } from '@/api/models'
 
 const { t: $t } = useI18n()
 const loading = ref(false)
 const models = ref<Model[]>([])
 
+type DeployForm = {
+  modelId: number
+  modelName: string
+  serviceName: string
+  framework: DeployModelRequest['framework']
+  apiPort: number
+  healthPort: number
+  gpuDevices: string
+  cpuLimit: string
+  memoryLimit: string
+  envVars: string
+  autoStart: boolean
+}
+
+type ModelConfigForm = Omit<ModelConfig, 'webConsole'> & {
+  webConsole: string
+}
+
 // 部署对话框
 const showDeployDialogFlag = ref(false)
 const deploying = ref(false)
-const deployForm = ref({
+const deployForm = ref<DeployForm>({
   modelId: 0,
   modelName: '',
   serviceName: '',
@@ -920,8 +938,11 @@ const handleDeploy = async () => {
       deployForm.value.envVars.split('\n').forEach(line => {
         const trimmed = line.trim()
         if (trimmed && trimmed.includes('=')) {
-          const [key, ...valueParts] = trimmed.split('=')
-          envVars[key.trim()] = valueParts.join('=').trim()
+          const [key = '', ...valueParts] = trimmed.split('=')
+          const trimmedKey = key.trim()
+          if (trimmedKey) {
+            envVars[trimmedKey] = valueParts.join('=').trim()
+          }
         }
       })
     }
@@ -1026,7 +1047,7 @@ const handleDeleteLocal = async (name: string) => {
 // 配置对话框
 const showConfigDialog = ref(false)
 
-const configForm = ref({
+const configForm = ref<ModelConfigForm>({
   apiEndpoint: 'https://100.93.0.38:9000',
   webConsole: 'https://100.93.0.38:9001',
   accessKey: '',
@@ -1051,7 +1072,10 @@ const handleSaveConfig = async () => {
       accessKey: configForm.value.accessKey ? '***' + configForm.value.accessKey.slice(-3) : '未设置',
     })
     
-    await modelsApi.updateModelConfig(configForm.value)
+    await modelsApi.updateModelConfig({
+      ...configForm.value,
+      webConsole: configForm.value.webConsole || undefined,
+    })
     alert('配置已保存！')
     showConfigDialog.value = false
     await loadModels()
@@ -1264,7 +1288,10 @@ const deleteModel = async (id: number) => {
 const loadConfig = async () => {
   try {
     const config = await modelsApi.getModelConfig()
-    configForm.value = config
+    configForm.value = {
+      ...config,
+      webConsole: config.webConsole || '',
+    }
   } catch (error) {
     console.error('获取配置失败:', error)
   }

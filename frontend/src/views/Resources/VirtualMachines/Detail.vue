@@ -206,6 +206,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import type { ApexOptions } from 'apexcharts'
 import AdminLayout from '@/components/layout/AdminLayout.vue'
 import { virtualMachinesApi } from '@/api/virtualMachines'
 import type { VMDetails, VMMonitoring } from '@/api/virtualMachines'
@@ -268,7 +269,7 @@ const cpuSeriesData = ref<number[]>([])
 const memorySeriesData = ref<number[]>([])
 const networkSeriesData = ref<number[]>([])
 
-const baseChartOptions = computed(() => {
+const baseChartOptions = computed<ApexOptions>(() => {
   const isDark = document?.documentElement?.classList?.contains('dark')
   return {
     chart: {
@@ -314,15 +315,15 @@ const cpuChartSeries = computed(() => [{ name: 'CPU', data: cpuSeriesData.value 
 const memoryChartSeries = computed(() => [{ name: 'Memory', data: memorySeriesData.value }])
 const networkChartSeries = computed(() => [{ name: 'Network', data: networkSeriesData.value }])
 
-const cpuChartOptions = computed(() => ({
+const cpuChartOptions = computed<ApexOptions>(() => ({
   ...baseChartOptions.value,
   colors: ['#3C50E0'],
 }))
-const memoryChartOptions = computed(() => ({
+const memoryChartOptions = computed<ApexOptions>(() => ({
   ...baseChartOptions.value,
   colors: ['#22C55E'],
 }))
-const networkChartOptions = computed(() => ({
+const networkChartOptions = computed<ApexOptions>(() => ({
   ...baseChartOptions.value,
   colors: ['#F59E0B'],
 }))
@@ -331,8 +332,10 @@ const parseKiB = (s?: string) => {
   if (!s) return null
   const m = String(s).trim().match(/^(\d+(?:\.\d+)?)\s*(kib|kb|mib|mb|gib|gb)$/i)
   if (!m) return null
-  const n = Number(m[1])
-  const u = m[2].toLowerCase()
+  const [, rawValue, rawUnit] = m
+  if (!rawValue || !rawUnit) return null
+  const n = Number(rawValue)
+  const u = rawUnit.toLowerCase()
   if (!Number.isFinite(n)) return null
   if (u === 'kib' || u === 'kb') return Math.round(n)
   if (u === 'mib' || u === 'mb') return Math.round(n * 1024)
@@ -375,12 +378,13 @@ const refreshMonitoring = async () => {
     const mon: VMMonitoring = await virtualMachinesApi.getVMMonitoring(vmName.value)
 
     const now = Date.now()
+    const previousAtMs = prevAtMs
     const cpuTimeNs = Number(mon.cpuUsage) || 0
     const vcpu = Number(vm.value.vcpu) || 1
 
     // 后端 mon.cpuUsage 当前是 virsh domstats 的 cpu.time (ns)，这里前端计算百分比
-    if (prevCpuTimeNs !== null && prevAtMs !== null && cpuTimeNs >= prevCpuTimeNs) {
-      const dtMs = now - prevAtMs
+    if (prevCpuTimeNs !== null && previousAtMs !== null && cpuTimeNs >= prevCpuTimeNs) {
+      const dtMs = now - previousAtMs
       const dCpuNs = cpuTimeNs - prevCpuTimeNs
       if (dtMs > 0) {
         const pct = (dCpuNs / (dtMs * 1e6 * vcpu)) * 100
@@ -402,8 +406,8 @@ const refreshMonitoring = async () => {
 
     // 网络：mon.networkRx/Tx 是累计字节，计算近一次间隔的吞吐，并按 1Gbps 归一化为百分比
     const netBytes = (Number(mon.networkRx) || 0) + (Number(mon.networkTx) || 0)
-    if (prevNetBytes !== null && prevAtMs !== null) {
-      const dtSec = (now - prevAtMs) / 1000
+    if (prevNetBytes !== null && previousAtMs !== null) {
+      const dtSec = (now - previousAtMs) / 1000
       const dBytes = netBytes - prevNetBytes
       if (dtSec > 0 && dBytes >= 0) {
         const mbps = (dBytes * 8) / 1e6 / dtSec
@@ -508,4 +512,3 @@ onUnmounted(() => {
   }
 })
 </script>
-

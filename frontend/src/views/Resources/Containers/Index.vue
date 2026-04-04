@@ -1348,7 +1348,9 @@ const savePortMappings = async () => {
   
   try {
     const ports = portMappings.value.map(p => {
-      const containerPort = typeof p.container === 'string' ? p.container.split('/')[0] : String(p.container)
+      const [containerPort = ''] = typeof p.container === 'string'
+        ? p.container.split('/')
+        : [String(p.container)]
       return {
         host: String(p.host),
         container: containerPort,

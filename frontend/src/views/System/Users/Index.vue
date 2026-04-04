@@ -362,7 +362,7 @@ const openDeleteDialog = (user: User) => {
 
 // 关闭删除对话框
 const closeDeleteDialog = () => {
-  showDeleteDialog.value = null
+  deleteTarget.value = null
   showDeleteDialog.value = false
 }
 

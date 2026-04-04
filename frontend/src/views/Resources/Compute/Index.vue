@@ -10,7 +10,7 @@
           type="button"
           :disabled="loading"
           class="inline-flex items-center gap-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-white/[0.06] px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 shadow-sm hover:bg-gray-50 dark:hover:bg-gray-800/50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          @click="loadDevices"
+          @click="refreshDevices"
         >
           <svg class="h-4 w-4" :class="{ 'animate-spin': loading }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -162,7 +162,7 @@
         <button
           type="button"
           class="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600 transition-colors"
-          @click="loadDevices"
+          @click="refreshDevices"
         >
           <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -201,7 +201,9 @@ const summaryStats = computed(() => {
     if (device.compute && device.compute !== 'Unknown') {
       const match = device.compute.match(/(\d+\.?\d*)/)
       if (match) {
-        let val = parseFloat(match[1])
+        const [, rawValue] = match
+        if (!rawValue) return sum
+        let val = parseFloat(rawValue)
         // 若后端返回的是 TFLOPS（如 "26.9 TFLOPS"），换算为 PFLOPS
         if (device.compute.includes('TFLOPS') && !device.compute.includes('PFLOPS')) val = val / 1000
         return sum + val
@@ -233,11 +235,15 @@ function formatComputePFLOPS(compute: string | undefined): string {
   if (compute.includes('PFLOPS')) return compute
   const match = compute.match(/(\d+\.?\d*)\s*TFLOPS/i)
   if (match) {
-    const pf = (parseFloat(match[1]) / 1000).toFixed(3)
+    const [, rawValue] = match
+    if (!rawValue) return compute
+    const pf = (parseFloat(rawValue) / 1000).toFixed(3)
     return `${pf} PFLOPS (FP16)`
   }
   return compute
 }
+
+const refreshDevices = () => loadDevices(false)
 
 let refreshInterval: number | undefined
 

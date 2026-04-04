@@ -80,9 +80,6 @@ export default defineConfig({
           proxy.on('close', (res, socket, head) => {
             console.log('Terminal WebSocket connection closed');
           });
-          proxy.on('upgrade', (req, socket, head) => {
-            console.log('Terminal WebSocket upgrade request:', req.url);
-          });
         },
       },
       // 后端API代理（包括其他WebSocket）

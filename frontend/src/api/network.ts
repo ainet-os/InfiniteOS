@@ -1,8 +1,15 @@
 import api from './index'
 
+export type NetworkDeviceType = 'ethernet' | 'bridge' | 'bond' | 'vlan' | 'wifi' | 'other'
+export type NetworkDeviceRole = 'physical' | 'logical' | 'system'
+
 export interface NetworkInterface {
   name: string
-  type: string
+  type: NetworkDeviceType
+  role: NetworkDeviceRole
+  managed: boolean
+  editable: boolean
+  deletable: boolean
   mac: string
   ip4: string
   ip6: string
@@ -12,6 +19,10 @@ export interface NetworkInterface {
   tx_bytes: number
   rx_sec: number
   tx_sec: number
+  interfaces?: string[]
+  link?: string
+  vlanId?: number
+  bondMode?: string
 }
 
 export interface NetworkStats {
@@ -29,23 +40,21 @@ export interface NetworkStats {
 
 export interface NetworkInterfaceDetails {
   name: string
-  type: string
-  method: 'auto' | 'static' | 'manual'
+  type: NetworkDeviceType
+  role: NetworkDeviceRole
+  managed: boolean
+  editable: boolean
+  deletable: boolean
+  method: 'auto' | 'static'
   ip4: string
   ip6: string
   gateway: string
   dns: string[]
   mac: string
-}
-
-export interface CreateNetworkRequest {
-  name: string
-  type?: string
-  method?: 'auto' | 'static'
-  ip4?: string
-  gateway?: string
-  dns?: string[]
-  mac?: string
+  interfaces: string[]
+  link: string
+  vlanId?: number
+  bondMode?: string
 }
 
 export interface UpdateNetworkRequest {
@@ -53,6 +62,22 @@ export interface UpdateNetworkRequest {
   ip4?: string
   gateway?: string
   dns?: string[]
+}
+
+export interface ApplyNetworkOperation {
+  action: 'upsert' | 'delete'
+  targetType: 'ethernet' | 'bridge' | 'bond' | 'vlan'
+  name: string
+  config?: {
+    method?: 'auto' | 'static'
+    ip4?: string
+    gateway?: string
+    dns?: string[]
+    interfaces?: string[]
+    link?: string
+    vlanId?: number
+    bondMode?: string
+  }
 }
 
 export const networkApi = {
@@ -65,14 +90,11 @@ export const networkApi = {
   getInterfaceDetails: (name: string): Promise<NetworkInterfaceDetails> => {
     return api.get(`/network/interfaces/${encodeURIComponent(name)}`)
   },
-  createInterface: (config: CreateNetworkRequest): Promise<{ success: boolean; message: string }> => {
-    return api.post('/network/interfaces', config)
-  },
   updateInterface: (name: string, config: UpdateNetworkRequest): Promise<{ success: boolean; message: string }> => {
     return api.put(`/network/interfaces/${encodeURIComponent(name)}`, config)
   },
-  deleteInterface: (name: string): Promise<{ success: boolean; message: string }> => {
-    return api.delete(`/network/interfaces/${encodeURIComponent(name)}`)
+  applyChanges: (operations: ApplyNetworkOperation[]): Promise<{ success: boolean; message: string }> => {
+    return api.post('/network/apply', { operations })
   },
   toggleInterface: (name: string, enable: boolean): Promise<{ success: boolean; message: string }> => {
     return api.post(`/network/interfaces/${encodeURIComponent(name)}/toggle`, { enable })
