@@ -1,6 +1,6 @@
 import express from 'express'
 import { authenticateToken } from '../middleware/auth.js'
-import { getSystemInfo, getSystemMetrics, getSystemOverview, getOverviewSummary } from '../services/systemService.js'
+import { getSystemInfo, getSystemMetrics, getSystemOverview, getOverviewSummary, getInfiniteAgentUrl } from '../services/systemService.js'
 
 const router = express.Router()
 
@@ -60,6 +60,20 @@ router.get('/overview-summary', async (req, res) => {
   } catch (error) {
     console.error('获取概览摘要数据错误:', error)
     res.status(500).json({ error: '获取概览摘要数据失败' })
+  }
+})
+
+/**
+ * InfiniteAgent 配置页链接（本机物理网卡 IPv4 + 38476，无可用地址时回退 127.0.0.1）
+ * GET /api/system/infiniteagent-url
+ */
+router.get('/infiniteagent-url', async (req, res) => {
+  try {
+    const data = await getInfiniteAgentUrl()
+    res.json(data)
+  } catch (error) {
+    console.error('获取 InfiniteAgent 地址错误:', error)
+    res.status(500).json({ error: '获取 InfiniteAgent 地址失败' })
   }
 })
 

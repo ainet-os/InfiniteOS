@@ -121,4 +121,13 @@ export const systemApi = {
   getOverviewSummary: (): Promise<OverviewSummary> => {
     return api.get('/system/overview-summary')
   },
+  getInfiniteAgentUrl: (): Promise<{
+    url: string
+    host: string
+    port: number
+    interfaceName?: string
+    fallback?: boolean
+  }> => {
+    return api.get('/system/infiniteagent-url')
+  },
 }

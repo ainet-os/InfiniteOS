@@ -296,9 +296,9 @@ export default {
       infiniteAgent: {
         title: 'InfiniteAgent',
         body:
-          'InfiniteAgent is a standalone networking and access agent (Linux supported) with a local web UI. After installing and starting InfiniteAgent on this machine, open its service URL in a browser (default port is in the project docs, e.g. http://127.0.0.1:38476).\n\nIn the Agent, configure the InfiniteUno address and tenant account; after networking is complete, enroll this host with the InfiniteUno platform for cloud–edge compute collaboration and scheduling; monitoring and control capabilities are also provided on the Agent side.\n\nAfter configuration, the node can be discovered and managed from the InfiniteUno platform for unified compute scheduling.',
-        repoUrl: 'http://127.0.0.1:38476/',
+          'InfiniteAgent is a standalone networking and access agent (Linux supported) with a local web UI. After installing and starting InfiniteAgent on this machine, open the link below (default: this machine’s physical NIC IPv4 and port 38476, so you can open it from another device on the LAN).\n\nIn the Agent, configure the InfiniteUno address and tenant account; after networking is complete, enroll this host with the InfiniteUno platform for cloud–edge compute collaboration and scheduling; monitoring and control capabilities are also provided on the Agent side.\n\nAfter configuration, the node can be discovered and managed from the InfiniteUno platform for unified compute scheduling.',
         repoLink: 'Open InfiniteAgent configuration in browser',
+        fallbackHint: '(No suitable IP found; using loopback)',
       },
     },
   },

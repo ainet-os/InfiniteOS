@@ -295,9 +295,9 @@ export default {
       infiniteAgent: {
         title: 'InfiniteAgent 使用说明',
         body:
-          'InfiniteAgent 是独立运行的组网与接入代理（支持linux系统），提供本地 Web 界面。请在本机安装并启动 InfiniteAgent 后，在浏览器中打开其服务地址（默认端口见项目文档，例如 http://127.0.0.1:38476）。\n\n在 Agent 中配置 InfiniteUno 地址与租户账号、完成组网后，可将本机注册到 InfiniteUno 平台，参与云边端算力协同与调度；监测、管控等能力亦在 Agent 侧完成。\n\n配置完成后，即可在 InfiniteUno 平台侧发现与管理本节点，实现算力资源的统一协同调度。',
-        repoUrl: 'http://127.0.0.1:38476/',
+          'InfiniteAgent 是独立运行的组网与接入代理（支持 Linux），提供本地 Web 界面。请在本机安装并启动 InfiniteAgent 后，在浏览器中打开下方链接（默认使用本机物理网卡 IPv4 与端口 38476，便于从其他设备访问）。\n\n在 Agent 中配置 InfiniteUno 地址与租户账号、完成组网后，可将本机注册到 InfiniteUno 平台，参与云边端算力协同与调度；监测、管控等能力亦在 Agent 侧完成。\n\n配置完成后，即可在 InfiniteUno 平台侧发现与管理本节点，实现算力资源的统一协同调度。',
         repoLink: '在浏览器打开InfiniteAgent配置页面',
+        fallbackHint: '（未检测到可用网卡地址，已使用本机回环）',
       },
     },
   },

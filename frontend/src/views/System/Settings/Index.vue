@@ -49,13 +49,16 @@
             <p class="flex-1 whitespace-pre-line">{{ $t('pages.about.infiniteAgent.body') }}</p>
             <p class="mt-3 pt-3 border-t border-gray-100 dark:border-gray-800">
               <a
-                :href="$t('pages.about.infiniteAgent.repoUrl')"
+                :href="infiniteAgentUrl"
                 target="_blank"
                 rel="noopener noreferrer"
-                class="text-brand-500 hover:text-brand-600 font-medium text-sm"
+                class="text-brand-500 hover:text-brand-600 font-medium text-sm break-all"
               >
                 {{ $t('pages.about.infiniteAgent.repoLink') }}
               </a>
+              <span v-if="infiniteAgentFallback" class="ml-2 text-xs text-gray-500 dark:text-gray-400">
+                {{ $t('pages.about.infiniteAgent.fallbackHint') }}
+              </span>
             </p>
           </div>
         </div>
@@ -65,5 +68,20 @@
 </template>
 
 <script setup lang="ts">
+import { ref, onMounted } from 'vue'
 import AdminLayout from '@/components/layout/AdminLayout.vue'
+import { systemApi } from '@/api/system'
+
+const infiniteAgentUrl = ref('http://127.0.0.1:38476/')
+const infiniteAgentFallback = ref(false)
+
+onMounted(async () => {
+  try {
+    const data = await systemApi.getInfiniteAgentUrl()
+    infiniteAgentUrl.value = data.url.endsWith('/') ? data.url : `${data.url}/`
+    infiniteAgentFallback.value = !!data.fallback
+  } catch {
+    // 保持默认
+  }
+})
 </script>

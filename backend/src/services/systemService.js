@@ -266,3 +266,57 @@ export const getOverviewSummary = async () => {
     throw error
   }
 }
+
+const INFINITE_AGENT_PORT = 38476
+
+function parseIPv4Only(ip4) {
+  if (!ip4 || typeof ip4 !== 'string') return ''
+  const m = ip4.trim().match(/^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/)
+  return m ? m[1] : ''
+}
+
+function isVirtualInterfaceName(name) {
+  if (!name || name === 'lo') return true
+  const n = name.toLowerCase()
+  const virtualPrefixes = ['docker', 'br-', 'virbr', 'veth', 'tun', 'tailscale', 'dummy', 'kube', 'cni', 'cilium']
+  return virtualPrefixes.some((p) => n.startsWith(p))
+}
+
+/**
+ * InfiniteAgent 本地 Web 地址：优先使用已启动物理网卡（以太网优先）的 IPv4 + 38476
+ */
+export const getInfiniteAgentUrl = async () => {
+  try {
+    const interfaces = await getNetworkInterfaces()
+    const scored = []
+    for (const iface of interfaces) {
+      if (iface.status !== 'up') continue
+      if (isVirtualInterfaceName(iface.name)) continue
+      const ip = parseIPv4Only(iface.ip4)
+      if (!ip || ip === '127.0.0.1') continue
+      let priority = 10
+      if (iface.type === 'ethernet') priority = 0
+      else if (iface.type === 'wifi') priority = 1
+      scored.push({ ip, priority, name: iface.name })
+    }
+    scored.sort((a, b) => a.priority - b.priority || a.name.localeCompare(b.name))
+    const pick = scored[0]
+    if (pick) {
+      return {
+        url: `http://${pick.ip}:${INFINITE_AGENT_PORT}`,
+        host: pick.ip,
+        port: INFINITE_AGENT_PORT,
+        interfaceName: pick.name,
+        fallback: false,
+      }
+    }
+  } catch (e) {
+    console.warn('getInfiniteAgentUrl:', e.message)
+  }
+  return {
+    url: `http://127.0.0.1:${INFINITE_AGENT_PORT}`,
+    host: '127.0.0.1',
+    port: INFINITE_AGENT_PORT,
+    fallback: true,
+  }
+}
