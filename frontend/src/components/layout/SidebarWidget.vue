@@ -6,7 +6,7 @@
       InfiniteOS是由ai.net实验室发起的面向云边端一体化场景的开源操作系统体系，融合虚拟化、容器与AI能力，支撑算力资源的统一管理、安全运行与智能协同。
     </p>
     <a
-      href="https://tailadmin.com/pricing"
+      href="https://ainetos.com/"
       target="_blank"
       rel="nofollow"
       class="flex items-center justify-center p-3 font-medium text-white rounded-lg bg-brand-500 text-theme-sm hover:bg-brand-600"
