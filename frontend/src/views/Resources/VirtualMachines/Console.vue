@@ -2,7 +2,7 @@
   <div class="fixed inset-0 z-50 bg-gray-900">
     <div class="flex flex-col h-full">
       <!-- 控制台头部 -->
-      <div class="flex items-center justify-between px-4 py-3 bg-gray-800 border-b border-gray-700">
+      <div class="flex items-center px-4 py-3 bg-gray-800 border-b border-gray-700">
         <div class="flex items-center gap-4">
           <h2 class="text-lg font-semibold text-white">虚拟机控制台 - {{ vmName }}</h2>
           <span
@@ -14,12 +14,6 @@
             {{ connected ? '已连接' : '未连接' }}
           </span>
         </div>
-        <button
-          @click="closeConsole"
-          class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded transition-colors"
-        >
-          关闭
-        </button>
       </div>
 
       <!-- 控制台内容 -->
@@ -46,12 +40,6 @@
               <p class="text-sm mb-2"><strong>VNC端口:</strong> {{ consoleInfo?.vncPort }}</p>
               <p class="text-sm mb-2"><strong>VNC显示:</strong> {{ consoleInfo?.vncDisplay }}</p>
             </div>
-            <button
-              @click="closeConsole"
-              class="mt-4 px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded transition-colors"
-            >
-              关闭
-            </button>
           </div>
         </div>
       </div>
@@ -61,12 +49,11 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, nextTick } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { virtualMachinesApi } from '@/api/virtualMachines'
 import RFB from '@novnc/novnc/lib/rfb'
 
 const route = useRoute()
-const router = useRouter()
 const vmName = ref(route.params.name as string)
 
 const loading = ref(true)
@@ -94,11 +81,6 @@ const buildWsUrlFromApiBase = (wsPath: string) => {
 
   return url.toString()
 }
-
-const closeConsole = () => {
-  router.back()
-}
-
 onMounted(async () => {
   try {
     status.value = '获取控制台信息...'
