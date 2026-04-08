@@ -82,13 +82,17 @@ let connectTimer: number | null = null
 
 const buildWsUrlFromApiBase = (wsPath: string) => {
   const token = localStorage.getItem('token') || ''
-  const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api'
-  const apiUrl = new URL(apiBase)
+  const apiBase = import.meta.env.VITE_API_BASE_URL || '/api'
+  const apiUrl = new URL(apiBase, window.location.origin)
   const wsProtocol = apiUrl.protocol === 'https:' ? 'wss:' : 'ws:'
-  const host = apiUrl.hostname
-  const port = apiUrl.port || (apiUrl.protocol === 'https:' ? '443' : '80')
-  const qs = token ? `?token=${encodeURIComponent(token)}` : ''
-  return `${wsProtocol}//${host}:${port}${wsPath}${qs}`
+  const url = new URL(wsPath, apiUrl.origin)
+
+  url.protocol = wsProtocol
+  if (token) {
+    url.searchParams.set('token', token)
+  }
+
+  return url.toString()
 }
 
 const closeConsole = () => {
@@ -143,10 +147,10 @@ onMounted(async () => {
     })
 
     // 若 2s 内仍未触发 connect，则认为连接异常
-    window.setTimeout(() => {
+    connectTimer = window.setTimeout(() => {
       if (!connected.value && !error.value) {
         loading.value = false
-        error.value = '连接超时（请确认 websockify 与 VNC 端口可达）'
+        error.value = '连接超时（请确认后端 WS 代理与 VNC 端口可达）'
       }
     }, 2000)
   } catch (err: any) {
