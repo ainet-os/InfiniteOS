@@ -49,19 +49,148 @@ export interface VMMonitoring {
   diskWrite: number
 }
 
+export interface VMOsOption {
+  id: string
+  label: string
+}
+
+export interface VMCapabilities {
+  tools: {
+    virsh: boolean
+    virtInstall: boolean
+    qemuImg: boolean
+    virtXml: boolean
+    swtpm: boolean
+  }
+  storagePools: Array<{
+    name: string
+    type: string
+    active: boolean
+    autostart: boolean
+    targetPath: string
+    capacity: string
+    allocation: string
+    available: string
+    capacityBytes: number
+    allocationBytes: number
+    availableBytes: number
+  }>
+  libvirtNetworks: Array<{
+    name: string
+    active: boolean
+    autostart: boolean
+    mode: string
+  }>
+  bridgeInterfaces: Array<{
+    name: string
+  }>
+  osOptions: VMOsOption[]
+  firmware: {
+    bios: boolean
+    uefi: boolean
+    uefiCandidates: Array<{
+      code: string
+      vars: string
+    }>
+    default: 'bios' | 'uefi'
+  }
+  features: {
+    tpm: boolean
+    graphics: Array<'vnc' | 'none' | string>
+    installSources: Array<'local_iso' | 'existing_disk' | string>
+    startModes: Array<'create_and_run' | 'create_and_edit' | string>
+    diskFormats: Array<'qcow2' | 'raw' | string>
+    diskBuses: Array<'virtio' | 'sata' | string>
+    networkModes: Array<'network' | 'bridge' | 'none' | string>
+  }
+  defaults: {
+    osId: string
+    storagePool: string
+    networkMode: 'network' | 'bridge' | 'none'
+    networkSource: string
+    firmware: 'bios' | 'uefi'
+    graphics: 'vnc' | 'none'
+    startMode: 'create_and_run' | 'create_and_edit'
+    diskFormat: 'qcow2' | 'raw'
+    diskBus: 'virtio' | 'sata'
+    memoryMiB: number
+    diskSizeGiB: number
+  }
+}
+
 export interface CreateVMRequest {
   name: string
-  osType: string
-  osVersion?: string
+  osId: string
   vcpu: number
-  memory: number
-  memoryUnit: 'MB' | 'GB'
-  disk: number
-  diskUnit: 'GB' | 'TB'
-  networkType: string
-  bootMode: string
-  isoPath?: string
-  startAfterCreate: boolean
+  memoryMiB: number
+  installSource:
+    | {
+        type: 'local_iso'
+        path: string
+      }
+    | {
+        type: 'existing_disk'
+      }
+  disks: Array<
+    | {
+        kind: 'new_disk_in_pool'
+        pool: string
+        sizeGiB: number
+        format: 'qcow2' | 'raw'
+        bus: 'virtio' | 'sata'
+      }
+    | {
+        kind: 'new_disk_at_path'
+        path: string
+        sizeGiB: number
+        format: 'qcow2' | 'raw'
+        bus: 'virtio' | 'sata'
+      }
+    | {
+        kind: 'existing_disk'
+        path: string
+        bus: 'virtio' | 'sata'
+      }
+  >
+  networks: Array<
+    | {
+        mode: 'network'
+        source: string
+      }
+    | {
+        mode: 'bridge'
+        source: string
+      }
+      | {
+        mode: 'none'
+      }
+  >
+  firmware: 'bios' | 'uefi'
+  tpm: boolean
+  graphics: 'vnc' | 'none'
+  startMode: 'create_and_run' | 'create_and_edit'
+}
+
+export interface VMCreationJob {
+  id: string
+  vmName: string
+  status: 'queued' | 'running' | 'succeeded' | 'failed'
+  stage: string
+  message: string
+  error: string | null
+  createdAt: string
+  updatedAt: string
+  startedAt: string | null
+  finishedAt: string | null
+  logs: Array<{
+    timestamp: string
+    level: string
+    message: string
+  }>
+  result: {
+    vmName: string
+    started: boolean
+  } | null
 }
 
 export const virtualMachinesApi = {
@@ -71,8 +200,16 @@ export const virtualMachinesApi = {
   getVMDetails: (name: string): Promise<VMDetails> => {
     return api.get(`/virtual-machines/${name}`)
   },
-  createVM: (config: CreateVMRequest): Promise<{ id: string; message: string }> => {
+  getVmCapabilities: (): Promise<VMCapabilities> => {
+    return api.get('/virtual-machines/capabilities')
+  },
+  createVM: (
+    config: CreateVMRequest,
+  ): Promise<{ jobId: string; vmName: string; status: string; message: string }> => {
     return api.post('/virtual-machines', config)
+  },
+  getVMCreationJob: (jobId: string): Promise<VMCreationJob> => {
+    return api.get(`/virtual-machines/jobs/${jobId}`)
   },
   startVM: (name: string): Promise<{ message: string }> => {
     return api.post(`/virtual-machines/${name}/start`)

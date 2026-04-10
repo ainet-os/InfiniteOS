@@ -3,7 +3,9 @@ import { authenticateToken } from '../middleware/auth.js'
 import {
   getVMs,
   getVMDetails,
+  getVmCapabilities,
   createVM,
+  getVMCreationJob,
   startVM,
   stopVM,
   restartVM,
@@ -30,6 +32,34 @@ router.get('/', async (req, res) => {
   } catch (error) {
     console.error('获取虚拟机列表错误:', error)
     res.status(500).json({ error: '获取虚拟机列表失败' })
+  }
+})
+
+/**
+ * 获取宿主机虚机能力
+ * GET /api/virtual-machines/capabilities
+ */
+router.get('/capabilities', async (req, res) => {
+  try {
+    const capabilities = await getVmCapabilities()
+    res.json(capabilities)
+  } catch (error) {
+    console.error('获取虚机能力错误:', error)
+    res.status(error.status || 500).json({ error: error.message || '获取虚机能力失败' })
+  }
+})
+
+/**
+ * 获取创建任务状态
+ * GET /api/virtual-machines/jobs/:jobId
+ */
+router.get('/jobs/:jobId', async (req, res) => {
+  try {
+    const job = await getVMCreationJob(req.params.jobId)
+    res.json(job)
+  } catch (error) {
+    console.error('获取虚机创建任务错误:', error)
+    res.status(error.status || 500).json({ error: error.message || '获取虚机创建任务失败' })
   }
 })
 
@@ -61,10 +91,10 @@ router.post('/', async (req, res) => {
   try {
     const vmConfig = req.body
     const result = await createVM(vmConfig)
-    res.json(result)
+    res.status(202).json(result)
   } catch (error) {
     console.error('创建虚拟机错误:', error)
-    res.status(500).json({ error: '创建虚拟机失败' })
+    res.status(error.status || 500).json({ error: error.message || '创建虚拟机失败' })
   }
 })
 
@@ -191,9 +221,8 @@ router.get('/:name/console', async (req, res) => {
   } catch (error) {
     console.error('获取虚拟机控制台信息错误:', error)
     const errorMessage = error.message || error.toString() || '获取虚拟机控制台信息失败'
-    res.status(500).json({ error: errorMessage })
+    res.status(error.status || 500).json({ error: errorMessage })
   }
 })
 
 export default router
-

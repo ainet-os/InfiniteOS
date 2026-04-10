@@ -81,6 +81,36 @@ const buildWsUrlFromApiBase = (wsPath: string) => {
 
   return url.toString()
 }
+
+const handleConsoleDisconnect = async (event: any) => {
+  const hadConnected = connected.value
+  connected.value = false
+  loading.value = false
+
+  if (hadConnected) {
+    try {
+      const vm = await virtualMachinesApi.getVMDetails(vmName.value)
+      if (vm?.status === 'stopped') {
+        status.value = '虚拟机已关机'
+        error.value = '虚拟机已关机，控制台连接已断开'
+        return
+      }
+      if (vm?.status === 'paused') {
+        status.value = '虚拟机已暂停'
+        error.value = '虚拟机已暂停，控制台连接已断开'
+        return
+      }
+    } catch (_) {
+      // ignore
+    }
+  }
+
+  const detail = event?.detail
+  const reason = detail?.clean ? '连接已关闭' : `连接断开（code: ${detail?.code ?? 'unknown'}）`
+  status.value = reason
+  error.value = `VNC 连接失败：${reason}`
+}
+
 onMounted(async () => {
   try {
     status.value = '获取控制台信息...'
@@ -114,13 +144,7 @@ onMounted(async () => {
     })
 
     rfb.addEventListener('disconnect', (e: any) => {
-      connected.value = false
-      loading.value = false
-      // 1006/等错误会在这里体现
-      const detail = e?.detail
-      const reason = detail?.clean ? '连接已关闭' : `连接断开（code: ${detail?.code ?? 'unknown'}）`
-      status.value = reason
-      error.value = `VNC 连接失败：${reason}`
+      void handleConsoleDisconnect(e)
     })
 
     rfb.addEventListener('credentialsrequired', () => {
