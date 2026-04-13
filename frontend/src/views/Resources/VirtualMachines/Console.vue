@@ -31,6 +31,16 @@
           </div>
         </div>
 
+        <div
+          v-else-if="disconnectKind === 'stopped' || disconnectKind === 'paused'"
+          class="absolute inset-0 flex items-center justify-center"
+        >
+          <div class="text-center text-white max-w-md px-6">
+            <p class="mb-3 text-lg font-medium text-gray-100">{{ status }}</p>
+            <p class="text-sm text-gray-400">{{ error }}</p>
+          </div>
+        </div>
+
         <div v-else-if="error" class="absolute inset-0 flex items-center justify-center">
           <div class="text-center text-white max-w-md">
             <p class="text-red-400 mb-4">{{ error }}</p>
@@ -60,6 +70,7 @@ const loading = ref(true)
 const error = ref('')
 const status = ref('初始化中...')
 const connected = ref(false)
+const disconnectKind = ref<'stopped' | 'paused' | 'error' | ''>('')
 const consoleInfo = ref<any>(null)
 const wsUrl = ref('')
 const screenEl = ref<HTMLElement | null>(null)
@@ -83,36 +94,42 @@ const buildWsUrlFromApiBase = (wsPath: string) => {
 }
 
 const handleConsoleDisconnect = async (event: any) => {
-  const hadConnected = connected.value
   connected.value = false
   loading.value = false
+  if (connectTimer) {
+    window.clearTimeout(connectTimer)
+    connectTimer = null
+  }
 
-  if (hadConnected) {
-    try {
-      const vm = await virtualMachinesApi.getVMDetails(vmName.value)
-      if (vm?.status === 'stopped') {
-        status.value = '虚拟机已关机'
-        error.value = '虚拟机已关机，控制台连接已断开'
-        return
-      }
-      if (vm?.status === 'paused') {
-        status.value = '虚拟机已暂停'
-        error.value = '虚拟机已暂停，控制台连接已断开'
-        return
-      }
-    } catch (_) {
-      // ignore
+  try {
+    const vm = await virtualMachinesApi.getVMDetails(vmName.value)
+    if (vm?.status === 'stopped') {
+      disconnectKind.value = 'stopped'
+      status.value = '虚拟机已关机'
+      error.value = '虚拟机已关机，控制台连接已断开'
+      return
     }
+    if (vm?.status === 'paused') {
+      disconnectKind.value = 'paused'
+      status.value = '虚拟机已暂停'
+      error.value = '虚拟机已暂停，控制台连接已断开'
+      return
+    }
+  } catch (_) {
+    // ignore
   }
 
   const detail = event?.detail
   const reason = detail?.clean ? '连接已关闭' : `连接断开（code: ${detail?.code ?? 'unknown'}）`
+  disconnectKind.value = 'error'
   status.value = reason
   error.value = `VNC 连接失败：${reason}`
 }
 
 onMounted(async () => {
   try {
+    disconnectKind.value = ''
+    error.value = ''
     status.value = '获取控制台信息...'
     const info = await virtualMachinesApi.getVMConsole(vmName.value)
     consoleInfo.value = info
@@ -139,8 +156,13 @@ onMounted(async () => {
 
     rfb.addEventListener('connect', () => {
       connected.value = true
+      disconnectKind.value = ''
       status.value = '已连接'
       loading.value = false
+      if (connectTimer) {
+        window.clearTimeout(connectTimer)
+        connectTimer = null
+      }
     })
 
     rfb.addEventListener('disconnect', (e: any) => {
