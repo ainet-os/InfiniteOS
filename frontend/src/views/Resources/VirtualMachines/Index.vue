@@ -223,6 +223,7 @@
                       >
                         <option value="virtio">virtio</option>
                         <option value="sata">sata</option>
+                        <option value="scsi">scsi</option>
                       </select>
                     </div>
                   </div>
@@ -487,6 +488,14 @@
                         {{ $t('common.stop') }}
                       </button>
                       <button
+                        v-if="vm.status !== 'stopped'"
+                        @click="powerOffVM(vm.name)"
+                        class="px-2 py-1 text-xs bg-error-800 text-white rounded hover:bg-error-900 transition-colors whitespace-nowrap dark:bg-error-700 dark:hover:bg-error-800"
+                        title="断电"
+                      >
+                        断电
+                      </button>
+                      <button
                         @click="restartVM(vm.name)"
                         class="px-2 py-1 text-xs bg-warning-600 dark:bg-warning-500 text-white rounded hover:bg-warning-700 dark:hover:bg-warning-600 transition-colors whitespace-nowrap"
                         :title="$t('common.restart')"
@@ -539,7 +548,7 @@ type MemoryUnit = 'MiB' | 'GiB'
 type InstallSourceType = 'local_iso' | 'existing_disk'
 type DiskFormKind = 'new_disk_at_path' | 'existing_disk'
 type DiskFormat = 'qcow2' | 'raw'
-type DiskBus = 'virtio' | 'sata'
+type DiskBus = 'virtio' | 'sata' | 'scsi'
 type NetworkFormMode = 'bridge' | 'none'
 
 interface DiskFormState {
@@ -649,7 +658,9 @@ const getDefaultDiskFormat = (): DiskFormat => {
 }
 
 const getDefaultDiskBus = (): DiskBus => {
-  return capabilities.value?.defaults.diskBus === 'sata' ? 'sata' : 'virtio'
+  if (capabilities.value?.defaults.diskBus === 'sata') return 'sata'
+  if (capabilities.value?.defaults.diskBus === 'scsi') return 'scsi'
+  return 'virtio'
 }
 
 const getDefaultDiskSizeGiB = () => {
@@ -1123,6 +1134,21 @@ const stopVM = async (name: string) => {
   } catch (error: any) {
     console.error('停止虚拟机失败:', error)
     alert(error?.error || '停止虚拟机失败')
+  }
+}
+
+const powerOffVM = async (name: string) => {
+  if (!confirm(`确定要强制断电虚拟机 ${name} 吗？`)) {
+    return
+  }
+
+  try {
+    await virtualMachinesApi.powerOffVM(name)
+    alert('虚拟机已断电')
+    await refreshVMs()
+  } catch (error: any) {
+    console.error('断电虚拟机失败:', error)
+    alert(error?.error || '虚拟机断电失败')
   }
 }
 

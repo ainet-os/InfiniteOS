@@ -24,19 +24,61 @@ export interface VMDetails {
   ram: string
   memory?: string
   memoryKiB?: number
+  memoryMiB?: number
+  cpuTopology?: {
+    sockets: number
+    cores: number
+    threads: number
+  }
   storage: string
   storageBytes?: number
+  cdrom?: {
+    target: string
+    source: string | null
+    bus: string
+    format?: string
+    capacityBytes?: number | null
+    actualSizeBytes?: number | null
+  } | null
+  cdroms?: Array<{
+    target: string
+    source: string | null
+    bus: string
+    format?: string
+    capacityBytes?: number | null
+    actualSizeBytes?: number | null
+  }>
+  bootOrder?: 'disk_first' | 'cdrom_first' | 'unknown'
+  editable?: {
+    cpuMemory: boolean
+    disks: boolean
+    networks: boolean
+    boot: boolean
+  }
   networkInterfaces: Array<{
     name: string
     mac: string
     source: string
     type: string
+    model?: string
+    mode?: 'bridge' | 'network' | 'unknown' | string
+    editable?: boolean
   }>
   disks: Array<{
     target: string
     source: string
     type: string
     bus: string
+    device?: 'disk' | 'cdrom'
+    role?: 'system' | 'data'
+    readonly?: boolean
+    capacityBytes?: number | null
+    actualSizeBytes?: number | null
+    sizeGiB?: number | null
+    format?: string
+    sourceType?: 'file' | 'block' | string
+    resizable?: boolean
+    removable?: boolean
   }>
 }
 
@@ -100,7 +142,7 @@ export interface VMCapabilities {
     installSources: Array<'local_iso' | 'existing_disk' | string>
     startModes: Array<'create_and_run' | 'create_and_edit' | string>
     diskFormats: Array<'qcow2' | 'raw' | string>
-    diskBuses: Array<'virtio' | 'sata' | string>
+    diskBuses: Array<'virtio' | 'sata' | 'scsi' | string>
     networkModes: Array<'network' | 'bridge' | 'none' | string>
   }
   defaults: {
@@ -112,7 +154,7 @@ export interface VMCapabilities {
     graphics: 'vnc' | 'none'
     startMode: 'create_and_run' | 'create_and_edit'
     diskFormat: 'qcow2' | 'raw'
-    diskBus: 'virtio' | 'sata'
+    diskBus: 'virtio' | 'sata' | 'scsi'
     memoryMiB: number
     diskSizeGiB: number
   }
@@ -137,19 +179,19 @@ export interface CreateVMRequest {
         pool: string
         sizeGiB: number
         format: 'qcow2' | 'raw'
-        bus: 'virtio' | 'sata'
+        bus: 'virtio' | 'sata' | 'scsi'
       }
     | {
         kind: 'new_disk_at_path'
         path: string
         sizeGiB: number
         format: 'qcow2' | 'raw'
-        bus: 'virtio' | 'sata'
+        bus: 'virtio' | 'sata' | 'scsi'
       }
     | {
         kind: 'existing_disk'
         path: string
-        bus: 'virtio' | 'sata'
+        bus: 'virtio' | 'sata' | 'scsi'
       }
   >
   networks: Array<
@@ -193,6 +235,47 @@ export interface VMCreationJob {
   } | null
 }
 
+export interface UpdateVMCpuMemoryRequest {
+  sockets: number
+  cores: number
+  threads: number
+  memoryMiB: number
+}
+
+export interface UpdateVMSystemDiskRequest {
+  bus: 'virtio' | 'sata' | 'scsi'
+  sizeGiB?: number
+}
+
+export interface UpdateVMDiskRequest {
+  bus: 'virtio' | 'sata' | 'scsi'
+  sizeGiB?: number
+}
+
+export interface AddVMDataDiskRequest {
+  path: string
+  sizeGiB: number
+  format: 'qcow2' | 'raw'
+  bus: 'virtio' | 'sata' | 'scsi'
+}
+
+export interface DeleteVMDiskRequest {
+  deleteFile?: boolean
+}
+
+export interface AddVMNetworkRequest {
+  source: string
+}
+
+export interface UpdateVMBootOrderRequest {
+  mode: 'disk_first' | 'cdrom_first'
+}
+
+export interface InsertVMCdromRequest {
+  path: string
+  bus?: 'sata' | 'scsi'
+}
+
 export const virtualMachinesApi = {
   getVMs: (): Promise<VirtualMachine[]> => {
     return api.get('/virtual-machines')
@@ -211,11 +294,55 @@ export const virtualMachinesApi = {
   getVMCreationJob: (jobId: string): Promise<VMCreationJob> => {
     return api.get(`/virtual-machines/jobs/${jobId}`)
   },
+  updateVMCpuMemory: (name: string, payload: UpdateVMCpuMemoryRequest): Promise<{ message: string }> => {
+    return api.post(`/virtual-machines/${name}/config/cpu-memory`, payload)
+  },
+  updateVMSystemDisk: (name: string, payload: UpdateVMSystemDiskRequest): Promise<{ message: string }> => {
+    return api.post(`/virtual-machines/${name}/disks/system`, payload)
+  },
+  updateVMDisk: (name: string, target: string, payload: UpdateVMDiskRequest): Promise<{ message: string }> => {
+    return api.post(`/virtual-machines/${name}/disks/${encodeURIComponent(target)}`, payload)
+  },
+  addVMDataDisk: (name: string, payload: AddVMDataDiskRequest): Promise<{ message: string; target: string }> => {
+    return api.post(`/virtual-machines/${name}/disks`, payload)
+  },
+  deleteVMDisk: (name: string, target: string, payload?: DeleteVMDiskRequest): Promise<{ message: string }> => {
+    return api.delete(`/virtual-machines/${name}/disks/${encodeURIComponent(target)}`, {
+      data: payload,
+    })
+  },
+  addVMNetworkInterface: (name: string, payload: AddVMNetworkRequest): Promise<{ message: string; mac: string }> => {
+    return api.post(`/virtual-machines/${name}/networks`, payload)
+  },
+  updateVMNetworkInterface: (name: string, mac: string, payload: AddVMNetworkRequest): Promise<{ message: string }> => {
+    return api.post(`/virtual-machines/${name}/networks/${encodeURIComponent(mac)}`, payload)
+  },
+  deleteVMNetworkInterface: (name: string, mac: string): Promise<{ message: string }> => {
+    return api.delete(`/virtual-machines/${name}/networks/${encodeURIComponent(mac)}`)
+  },
+  addVMCdrom: (name: string, payload: InsertVMCdromRequest): Promise<{ message: string; target: string }> => {
+    return api.post(`/virtual-machines/${name}/cdroms`, payload)
+  },
+  ejectVMCdrom: (name: string, target: string): Promise<{ message: string }> => {
+    return api.post(`/virtual-machines/${name}/cdroms/${encodeURIComponent(target)}/eject`)
+  },
+  insertVMCdrom: (name: string, target: string, payload: InsertVMCdromRequest): Promise<{ message: string }> => {
+    return api.post(`/virtual-machines/${name}/cdroms/${encodeURIComponent(target)}/insert`, payload)
+  },
+  deleteVMCdrom: (name: string, target: string): Promise<{ message: string }> => {
+    return api.delete(`/virtual-machines/${name}/cdroms/${encodeURIComponent(target)}`)
+  },
+  updateVMBootOrder: (name: string, payload: UpdateVMBootOrderRequest): Promise<{ message: string }> => {
+    return api.post(`/virtual-machines/${name}/boot-order`, payload)
+  },
   startVM: (name: string): Promise<{ message: string }> => {
     return api.post(`/virtual-machines/${name}/start`)
   },
   stopVM: (name: string): Promise<{ message: string }> => {
     return api.post(`/virtual-machines/${name}/stop`)
+  },
+  powerOffVM: (name: string): Promise<{ message: string }> => {
+    return api.post(`/virtual-machines/${name}/poweroff`)
   },
   restartVM: (name: string): Promise<{ message: string }> => {
     return api.post(`/virtual-machines/${name}/restart`)

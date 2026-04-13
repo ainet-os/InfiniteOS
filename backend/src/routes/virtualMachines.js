@@ -6,8 +6,25 @@ import {
   getVmCapabilities,
   createVM,
   getVMCreationJob,
+  updateVMCpuMemory,
+  updateVMSystemDisk,
+  updateVMDisk,
+  addVMDataDisk,
+  addVMCdromDevice,
+  deleteVMDisk,
+  addVMNetworkInterface,
+  updateVMNetworkInterfaceConfig,
+  deleteVMNetworkInterface,
+  ejectVMCdromMedia,
+  ejectVMCdromMediaByTarget,
+  insertVMCdromMedia,
+  insertVMCdromMediaByTarget,
+  deleteVMCdrom,
+  deleteVMCdromByTarget,
+  updateVMBootOrder,
   startVM,
   stopVM,
+  powerOffVM,
   restartVM,
   deleteVM,
   suspendVM,
@@ -132,6 +149,22 @@ router.post('/:name/stop', async (req, res) => {
 })
 
 /**
+ * 断电虚拟机
+ * POST /api/virtual-machines/:name/poweroff
+ */
+router.post('/:name/poweroff', async (req, res) => {
+  try {
+    const vmName = req.params.name
+    const result = await powerOffVM(vmName)
+    res.json(result)
+  } catch (error) {
+    console.error('断电虚拟机错误:', error)
+    const errorMessage = error.message || error.toString() || '虚拟机断电失败'
+    res.status(500).json({ error: errorMessage })
+  }
+})
+
+/**
  * 重启虚拟机
  * POST /api/virtual-machines/:name/restart
  */
@@ -174,6 +207,166 @@ router.post('/:name/resume', async (req, res) => {
   } catch (error) {
     console.error('恢复虚拟机错误:', error)
     res.status(500).json({ error: '恢复虚拟机失败' })
+  }
+})
+
+router.post('/:name/config/cpu-memory', async (req, res) => {
+  try {
+    const result = await updateVMCpuMemory(req.params.name, req.body)
+    res.json(result)
+  } catch (error) {
+    console.error('更新虚机 CPU/内存错误:', error)
+    res.status(error.status || 500).json({ error: error.message || '更新虚机 CPU/内存失败' })
+  }
+})
+
+router.post('/:name/disks/system', async (req, res) => {
+  try {
+    const result = await updateVMSystemDisk(req.params.name, req.body)
+    res.json(result)
+  } catch (error) {
+    console.error('更新系统磁盘错误:', error)
+    res.status(error.status || 500).json({ error: error.message || '更新系统磁盘失败' })
+  }
+})
+
+router.post('/:name/disks/:target', async (req, res) => {
+  try {
+    const result = await updateVMDisk(req.params.name, req.params.target, req.body)
+    res.json(result)
+  } catch (error) {
+    console.error('更新磁盘错误:', error)
+    res.status(error.status || 500).json({ error: error.message || '更新磁盘失败' })
+  }
+})
+
+router.post('/:name/disks', async (req, res) => {
+  try {
+    const result = await addVMDataDisk(req.params.name, req.body)
+    res.json(result)
+  } catch (error) {
+    console.error('添加数据磁盘错误:', error)
+    res.status(error.status || 500).json({ error: error.message || '添加数据磁盘失败' })
+  }
+})
+
+router.post('/:name/cdroms', async (req, res) => {
+  try {
+    const result = await addVMCdromDevice(req.params.name, req.body)
+    res.json(result)
+  } catch (error) {
+    console.error('添加光驱错误:', error)
+    res.status(error.status || 500).json({ error: error.message || '添加光驱失败' })
+  }
+})
+
+router.delete('/:name/disks/:target', async (req, res) => {
+  try {
+    const result = await deleteVMDisk(req.params.name, req.params.target, req.body)
+    res.json(result)
+  } catch (error) {
+    console.error('删除数据磁盘错误:', error)
+    res.status(error.status || 500).json({ error: error.message || '删除数据磁盘失败' })
+  }
+})
+
+router.post('/:name/networks', async (req, res) => {
+  try {
+    const result = await addVMNetworkInterface(req.params.name, req.body)
+    res.json(result)
+  } catch (error) {
+    console.error('添加网卡错误:', error)
+    res.status(error.status || 500).json({ error: error.message || '添加网卡失败' })
+  }
+})
+
+router.post('/:name/networks/:mac', async (req, res) => {
+  try {
+    const result = await updateVMNetworkInterfaceConfig(req.params.name, req.params.mac, req.body)
+    res.json(result)
+  } catch (error) {
+    console.error('更新网卡错误:', error)
+    res.status(error.status || 500).json({ error: error.message || '更新网卡失败' })
+  }
+})
+
+router.delete('/:name/networks/:mac', async (req, res) => {
+  try {
+    const result = await deleteVMNetworkInterface(req.params.name, req.params.mac)
+    res.json(result)
+  } catch (error) {
+    console.error('删除网卡错误:', error)
+    res.status(error.status || 500).json({ error: error.message || '删除网卡失败' })
+  }
+})
+
+router.post('/:name/cdrom/eject', async (req, res) => {
+  try {
+    const result = await ejectVMCdromMedia(req.params.name)
+    res.json(result)
+  } catch (error) {
+    console.error('弹出 ISO 错误:', error)
+    res.status(error.status || 500).json({ error: error.message || '弹出 ISO 失败' })
+  }
+})
+
+router.post('/:name/cdroms/:target/eject', async (req, res) => {
+  try {
+    const result = await ejectVMCdromMediaByTarget(req.params.name, req.params.target)
+    res.json(result)
+  } catch (error) {
+    console.error('弹出 ISO 错误:', error)
+    res.status(error.status || 500).json({ error: error.message || '弹出 ISO 失败' })
+  }
+})
+
+router.post('/:name/cdrom/insert', async (req, res) => {
+  try {
+    const result = await insertVMCdromMedia(req.params.name, req.body)
+    res.json(result)
+  } catch (error) {
+    console.error('插入 ISO 错误:', error)
+    res.status(error.status || 500).json({ error: error.message || '插入 ISO 失败' })
+  }
+})
+
+router.post('/:name/cdroms/:target/insert', async (req, res) => {
+  try {
+    const result = await insertVMCdromMediaByTarget(req.params.name, req.params.target, req.body)
+    res.json(result)
+  } catch (error) {
+    console.error('插入 ISO 错误:', error)
+    res.status(error.status || 500).json({ error: error.message || '插入 ISO 失败' })
+  }
+})
+
+router.delete('/:name/cdrom', async (req, res) => {
+  try {
+    const result = await deleteVMCdrom(req.params.name)
+    res.json(result)
+  } catch (error) {
+    console.error('删除光驱错误:', error)
+    res.status(error.status || 500).json({ error: error.message || '删除光驱失败' })
+  }
+})
+
+router.delete('/:name/cdroms/:target', async (req, res) => {
+  try {
+    const result = await deleteVMCdromByTarget(req.params.name, req.params.target)
+    res.json(result)
+  } catch (error) {
+    console.error('删除光驱错误:', error)
+    res.status(error.status || 500).json({ error: error.message || '删除光驱失败' })
+  }
+})
+
+router.post('/:name/boot-order', async (req, res) => {
+  try {
+    const result = await updateVMBootOrder(req.params.name, req.body)
+    res.json(result)
+  } catch (error) {
+    console.error('更新引导顺序错误:', error)
+    res.status(error.status || 500).json({ error: error.message || '更新引导顺序失败' })
   }
 })
 

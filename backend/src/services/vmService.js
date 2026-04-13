@@ -4,6 +4,35 @@ import { tmpdir } from 'os'
 import { dirname, isAbsolute, join } from 'path'
 import { randomUUID } from 'crypto'
 import { execFileCommand, execSudoFile } from '../utils/exec.js'
+import {
+  addVmCdrom,
+  addVmBridgeInterface,
+  addVmDataDisk,
+  buildVmDomainXml,
+  ejectVmCdrom,
+  ejectVmCdromByTarget,
+  getVmBootOrder,
+  getVmCdrom,
+  getVmCdroms,
+  getVmCpuTopology,
+  getVmDiskSummaries,
+  getVmMemoryKiB,
+  getVmNetworkSummaries,
+  getVmSystemDisk,
+  insertVmCdromMediaByTarget,
+  parseVmDomainXml,
+  removeVmCdrom,
+  removeVmCdromByTarget,
+  removeVmDisk,
+  removeVmDataDisk,
+  removeVmInterface,
+  setVmBootOrder,
+  updateVmDiskBus,
+  updateVmBridgeInterface,
+  updateVmCpuMemoryDomain,
+  updateVmSystemDiskBus,
+  upsertVmCdrom,
+} from './vmXmlService.js'
 
 const VM_JOB_RETENTION_MS = 24 * 60 * 60 * 1000
 const MAX_JOB_LOGS = 200
@@ -117,6 +146,26 @@ const parseSizeToBytes = (value) => {
 }
 
 const parseYesNo = (value) => String(value || '').trim().toLowerCase() === 'yes'
+
+const normalizeDiskBus = (bus, fallback = 'virtio') => {
+  const value = String(bus || '').trim().toLowerCase()
+  if (value === 'virtio' || value === 'sata' || value === 'scsi') return value
+
+  const fallbackValue = String(fallback || '').trim().toLowerCase()
+  if (fallbackValue === 'sata' || fallbackValue === 'scsi') return fallbackValue
+  return 'virtio'
+}
+
+const normalizeCdromBus = (bus, fallback = 'sata') => {
+  const value = String(bus || '').trim().toLowerCase()
+  if (value === 'sata' || value === 'scsi') return value
+  return String(fallback || '').trim().toLowerCase() === 'scsi' ? 'scsi' : 'sata'
+}
+
+const roundGiBFromMiB = (memoryMiB) => {
+  if (!Number.isFinite(memoryMiB) || memoryMiB <= 0) return 1
+  return Math.max(1, Math.round(memoryMiB / 1024))
+}
 
 const extractDisksFromXml = (xml) => {
   const disks = []
@@ -544,6 +593,155 @@ const getVmXml = async (vmName) => {
   return success ? stdout : ''
 }
 
+const getVmDomainState = async (vmName) => {
+  const info = await getVmDominfo(vmName)
+  if (!info) {
+    throw new HttpError(404, `虚拟机 ${vmName} 不存在`)
+  }
+
+  const xml = await getVmXml(vmName)
+  if (!xml) {
+    throw new HttpError(500, `无法读取虚拟机 ${vmName} 的定义`)
+  }
+
+  return {
+    info,
+    xml,
+    domain: parseVmDomainXml(xml),
+  }
+}
+
+const ensureVmStoppedForConfig = (info) => {
+  if (normalizeVmStatus(info?.State) !== 'stopped') {
+    throw new HttpError(409, '请先关机后再修改虚机配置')
+  }
+}
+
+const defineVmPersistentXml = async (vmName, xml, suffix = 'config') => {
+  const xmlPath = join(tmpdir(), `infiniteos-vm-${suffix}-${vmName}.xml`)
+  await writeFile(xmlPath, xml, 'utf8')
+  try {
+    const result = await runVirsh(['define', xmlPath], { timeout: 30000 })
+    if (!result.success) {
+      throw new Error(result.stderr || result.stdout || '更新虚拟机定义失败')
+    }
+  } finally {
+    await safeUnlink(xmlPath)
+  }
+}
+
+const getVmDiskCapacityBytes = async (vmName, target) => {
+  if (!target) return null
+  const blkInfoResult = await runVirsh(['domblkinfo', vmName, target], {
+    timeout: 15000,
+  })
+  if (!blkInfoResult.success) return null
+  const capacityLine = blkInfoResult.stdout
+    .split('\n')
+    .find((line) => line.toLowerCase().startsWith('capacity:'))
+  if (!capacityLine) return null
+  const capacity = Number(capacityLine.split(':')[1].trim())
+  return Number.isFinite(capacity) && capacity > 0 ? capacity : null
+}
+
+const getImageSizeGiB = (bytes) => {
+  const value = Number(bytes)
+  if (!Number.isFinite(value) || value <= 0) return null
+  return Math.max(1, Math.round(value / 1024 / 1024 / 1024))
+}
+
+const getQemuImgInfo = async (targetPath) => {
+  if (!targetPath) return null
+
+  const result = await runQemuImg(['info', '--output=json', targetPath], {
+    timeout: 15000,
+  })
+  if (!result.success) {
+    return null
+  }
+
+  try {
+    const parsed = JSON.parse(result.stdout || '{}')
+    const virtualSize = Number(parsed['virtual-size'])
+    const actualSize = Number(parsed['actual-size'])
+    return {
+      format: typeof parsed.format === 'string' ? parsed.format.trim() : '',
+      capacityBytes: Number.isFinite(virtualSize) && virtualSize > 0 ? virtualSize : null,
+      actualSizeBytes: Number.isFinite(actualSize) && actualSize >= 0 ? actualSize : null,
+    }
+  } catch {
+    return null
+  }
+}
+
+const buildVmDiskImageInfoMap = async (devices) => {
+  const infoByTarget = new Map()
+
+  for (const device of devices) {
+    if (!device?.target || !device?.source) continue
+    const info = await getQemuImgInfo(device.source)
+    if (info) {
+      infoByTarget.set(device.target, info)
+    }
+  }
+
+  return infoByTarget
+}
+
+const buildVmDiskCapacityMap = async (vmName, domain) => {
+  const capacityByTarget = new Map()
+  for (const disk of getVmDiskSummaries(domain)) {
+    if (!disk.target) continue
+    const capacity = await getVmDiskCapacityBytes(vmName, disk.target)
+    if (Number.isFinite(capacity) && capacity > 0) {
+      capacityByTarget.set(disk.target, capacity)
+    }
+  }
+  return capacityByTarget
+}
+
+const getVmMemoryMiBFromDomain = (domain, fallbackKiB = 0) => {
+  const memoryKiB = getVmMemoryKiB(domain, fallbackKiB)
+  if (!Number.isFinite(memoryKiB) || memoryKiB <= 0) return 0
+  return Math.max(1, Math.round(memoryKiB / 1024))
+}
+
+const createRandomVmMacAddress = (existingMacs = new Set()) => {
+  for (let attempt = 0; attempt < 32; attempt += 1) {
+    const source = randomUUID().replaceAll('-', '').slice(0, 6)
+    const parts = source.match(/.{1,2}/g) || []
+    const mac = ['52', '54', '00', ...parts].join(':').toLowerCase()
+    if (!existingMacs.has(mac)) {
+      return mac
+    }
+  }
+  throw new Error('无法生成唯一的网卡 MAC 地址')
+}
+
+const validateCpuTopology = ({ sockets, cores, threads }) => {
+  const normalized = {
+    sockets: Math.max(1, Math.round(Number(sockets) || 0)),
+    cores: Math.max(1, Math.round(Number(cores) || 0)),
+    threads: Math.max(1, Math.round(Number(threads) || 0)),
+  }
+  const total = normalized.sockets * normalized.cores * normalized.threads
+  if (total < 1 || total > 64) {
+    throw new HttpError(400, 'vCPU 数量必须在 1 到 64 之间')
+  }
+  return {
+    ...normalized,
+    total,
+  }
+}
+
+const validateMemoryMiB = (memoryMiB) => {
+  const normalized = Math.round(Number(memoryMiB) || 0)
+  if (!Number.isFinite(normalized) || normalized <= 0) {
+    throw new HttpError(400, '内存必须大于 0 MiB')
+  }
+  return normalized
+}
+
 const getDefaultNetworkName = (networks) => {
   return networks.find((network) => network.name === 'default')?.name || networks[0]?.name || ''
 }
@@ -682,7 +880,7 @@ const getVmCapabilitiesInternal = async () => {
       installSources: ['local_iso', 'existing_disk'],
       startModes: ['create_and_run', 'create_and_edit'],
       diskFormats: ['qcow2', 'raw'],
-      diskBuses: ['virtio', 'sata'],
+      diskBuses: ['virtio', 'sata', 'scsi'],
       networkModes: ['network', 'bridge', 'none'],
     },
     defaults: {
@@ -766,7 +964,7 @@ const normalizeDiskConfig = (disk) => ({
   path: typeof disk?.path === 'string' ? disk.path.trim() : '',
   sizeGiB: Number(disk?.sizeGiB),
   format: disk?.format === 'raw' ? 'raw' : 'qcow2',
-  bus: disk?.bus === 'sata' ? 'sata' : 'virtio',
+  bus: normalizeDiskBus(disk?.bus),
 })
 
 const normalizeNetworkConfig = (network) => ({
@@ -1089,7 +1287,13 @@ const createVmXmlDefinition = async (request, diskPaths) => {
   if (!xml.startsWith('<domain')) {
     throw new Error('virt-install 未返回有效的虚拟机定义 XML')
   }
-  return xml
+  if (request.installSource.type !== 'local_iso') {
+    return xml
+  }
+
+  const domain = parseVmDomainXml(xml)
+  setVmBootOrder(domain, 'disk_first')
+  return buildVmDomainXml(domain)
 }
 
 const createVmWithVirtInstall = async (request, diskPaths) => {
@@ -1098,6 +1302,12 @@ const createVmWithVirtInstall = async (request, diskPaths) => {
   if (!result.success) {
     throw new Error(result.stderr || result.stdout || '创建虚拟机失败')
   }
+}
+
+const applyVmLocalIsoDefaults = async (vmName) => {
+  const { domain } = await getVmDomainState(vmName)
+  setVmBootOrder(domain, 'disk_first')
+  await defineVmPersistentXml(vmName, buildVmDomainXml(domain), 'boot-order')
 }
 
 const defineVmFromXml = async (jobId, request, xml) => {
@@ -1146,6 +1356,10 @@ const executeCreateVmJob = async (jobId, request) => {
       setVmJobStage(jobId, 'running', 'defining_domain', '正在通过 virt-install 创建并启动虚拟机')
       await createVmWithVirtInstall(request, diskPaths)
       createdArtifacts.domainDefined = true
+
+      if (request.installSource.type === 'local_iso') {
+        await applyVmLocalIsoDefaults(request.name)
+      }
 
       completeVmJob(
         jobId,
@@ -1232,22 +1446,41 @@ export const getVMDetails = async (vmName) => {
     const vcpu = parseInt(info['CPU(s)']) || 1
     const maxMemKiB = parseMemToKiB(info['Max memory']) ?? 0
     const xml = await getVmXml(vmName)
-    const disks = extractDisksFromXml(xml)
-    const networkInterfaces = extractIfacesFromXml(xml)
-
-    let storageBytes = 0
-    for (const disk of disks) {
-      if (!disk.target) continue
-      const blkInfoResult = await runVirsh(['domblkinfo', vmName, disk.target])
-      if (!blkInfoResult.success) continue
-      const capacityLine = blkInfoResult.stdout
-        .split('\n')
-        .find((line) => line.toLowerCase().startsWith('capacity:'))
-      if (!capacityLine) continue
-      const capacity = Number(capacityLine.split(':')[1].trim())
-      if (Number.isFinite(capacity) && capacity > 0) {
-        storageBytes += capacity
+    const domain = parseVmDomainXml(xml)
+    const rawDisks = getVmDiskSummaries(domain)
+    const diskImageInfoByTarget = await buildVmDiskImageInfoMap(rawDisks)
+    const disks = rawDisks.map((disk) => {
+      const imageInfo = diskImageInfoByTarget.get(disk.target)
+      const capacityBytes = imageInfo?.capacityBytes ?? disk.capacityBytes ?? null
+      return {
+        ...disk,
+        capacityBytes,
+        sizeGiB: getImageSizeGiB(capacityBytes),
+        actualSizeBytes: imageInfo?.actualSizeBytes ?? null,
+        format: imageInfo?.format || disk.format || '',
       }
+    })
+    const networkInterfaces = getVmNetworkSummaries(domain)
+    const storageBytes = disks.reduce((total, disk) => total + (disk.capacityBytes || 0), 0)
+    const cpuTopology = getVmCpuTopology(domain, vcpu)
+    const memoryMiB = getVmMemoryMiBFromDomain(domain, maxMemKiB)
+    const cdromBases = getVmCdroms(domain)
+    const cdroms = await Promise.all(
+      cdromBases.map(async (cdromBase) => {
+        const cdromInfo = cdromBase?.source ? await getQemuImgInfo(cdromBase.source) : null
+        return {
+          ...cdromBase,
+          format: cdromInfo?.format || '',
+          capacityBytes: cdromInfo?.capacityBytes ?? null,
+          actualSizeBytes: cdromInfo?.actualSizeBytes ?? null,
+        }
+      })
+    )
+    const editable = {
+      cpuMemory: status === 'stopped',
+      disks: status === 'stopped',
+      networks: status === 'stopped',
+      boot: status === 'stopped',
     }
 
     return {
@@ -1262,15 +1495,486 @@ export const getVMDetails = async (vmName) => {
       ram: maxMemKiB ? formatKiB(maxMemKiB) : info['Max memory'] || '0',
       memory: maxMemKiB ? formatKiB(maxMemKiB) : info['Used memory'] || '0',
       memoryKiB: maxMemKiB,
+      memoryMiB,
+      cpuTopology,
       storage: storageBytes ? formatBytes(storageBytes) : disks.length > 0 ? '已配置' : '未配置',
       storageBytes,
       networkInterfaces,
       disks,
+      cdrom: cdroms[0] || null,
+      cdroms,
+      bootOrder: getVmBootOrder(domain),
+      editable,
     }
   } catch (error) {
     console.error('获取虚拟机详情错误:', error)
     return null
   }
+}
+
+export const updateVMCpuMemory = async (vmName, payload) => {
+  const { info, domain } = await getVmDomainState(vmName)
+  ensureVmStoppedForConfig(info)
+
+  const topology = validateCpuTopology(payload || {})
+  const memoryMiB = validateMemoryMiB(payload?.memoryMiB)
+
+  updateVmCpuMemoryDomain(domain, {
+    sockets: topology.sockets,
+    cores: topology.cores,
+    threads: topology.threads,
+    memoryKiB: memoryMiB * 1024,
+  })
+
+  await defineVmPersistentXml(vmName, buildVmDomainXml(domain), 'cpu-memory')
+  return { message: 'CPU 和内存配置已更新' }
+}
+
+export const updateVMSystemDisk = async (vmName, payload) => {
+  const { info, domain } = await getVmDomainState(vmName)
+  ensureVmStoppedForConfig(info)
+
+  const systemDisk = getVmSystemDisk(domain)
+  if (!systemDisk) {
+    throw new HttpError(404, '未找到系统磁盘')
+  }
+
+  const currentBus = normalizeDiskBus(systemDisk?.target?.['@_bus'])
+  const nextBus = normalizeDiskBus(payload?.bus, currentBus)
+  const currentSource = systemDisk?.source?.['@_file'] || systemDisk?.source?.['@_dev'] || ''
+  const currentSourceType = systemDisk?.source?.['@_dev'] ? 'block' : 'file'
+  const target = systemDisk?.target?.['@_dev'] || ''
+  const nextSizeGiB =
+    payload?.sizeGiB === undefined || payload?.sizeGiB === null
+      ? null
+      : Math.max(1, Math.round(Number(payload.sizeGiB) || 0))
+
+  if (nextSizeGiB !== null && (!Number.isFinite(nextSizeGiB) || nextSizeGiB < 1)) {
+    throw new HttpError(400, '系统磁盘容量至少为 1 GiB')
+  }
+
+  let definitionChanged = false
+
+  if (nextBus !== currentBus) {
+    updateVmSystemDiskBus(domain, nextBus)
+    definitionChanged = true
+  }
+
+  if (nextSizeGiB !== null) {
+    if (currentSourceType !== 'file' || !currentSource) {
+      throw new HttpError(400, '当前系统磁盘不支持扩容')
+    }
+
+    const currentBytes = await getVmDiskCapacityBytes(vmName, target)
+    const nextBytes = Math.round(nextSizeGiB * 1024 * 1024 * 1024)
+    if (Number.isFinite(currentBytes) && nextBytes < currentBytes) {
+      throw new HttpError(400, '系统磁盘仅支持扩容，不支持缩容')
+    }
+
+    if (!Number.isFinite(currentBytes) || nextBytes > currentBytes) {
+      const resizeResult = await runQemuImg(['resize', currentSource, `${nextSizeGiB}G`], {
+        timeout: 30000,
+      })
+      if (!resizeResult.success) {
+        throw new Error(resizeResult.stderr || resizeResult.stdout || '系统磁盘扩容失败')
+      }
+    }
+  }
+
+  if (definitionChanged) {
+    await defineVmPersistentXml(vmName, buildVmDomainXml(domain), 'system-disk')
+  }
+
+  return { message: '系统磁盘配置已更新' }
+}
+
+export const updateVMDisk = async (vmName, target, payload) => {
+  const { info, domain } = await getVmDomainState(vmName)
+  ensureVmStoppedForConfig(info)
+
+  const normalizedTarget = String(target || '').trim()
+  if (!normalizedTarget) {
+    throw new HttpError(400, '缺少磁盘设备标识')
+  }
+
+  const disk = getVmDiskSummaries(domain).find((item) => item.target === normalizedTarget)
+  if (!disk) {
+    throw new HttpError(404, '未找到指定磁盘')
+  }
+
+  const nextBus = normalizeDiskBus(payload?.bus, disk.bus)
+  const nextSizeGiB =
+    payload?.sizeGiB === undefined || payload?.sizeGiB === null
+      ? null
+      : Math.max(1, Math.round(Number(payload.sizeGiB) || 0))
+
+  if (nextSizeGiB !== null && (!Number.isFinite(nextSizeGiB) || nextSizeGiB < 1)) {
+    throw new HttpError(400, '磁盘容量至少为 1 GiB')
+  }
+
+  let definitionChanged = false
+
+  if (nextBus !== disk.bus) {
+    updateVmDiskBus(domain, normalizedTarget, nextBus)
+    definitionChanged = true
+  }
+
+  if (nextSizeGiB !== null) {
+    if (disk.sourceType !== 'file' || !disk.source) {
+      throw new HttpError(400, '当前磁盘不支持扩容')
+    }
+
+    const currentBytes = await getVmDiskCapacityBytes(vmName, normalizedTarget)
+    const nextBytes = Math.round(nextSizeGiB * 1024 * 1024 * 1024)
+    if (Number.isFinite(currentBytes) && nextBytes < currentBytes) {
+      throw new HttpError(400, '磁盘仅支持扩容，不支持缩容')
+    }
+
+    if (!Number.isFinite(currentBytes) || nextBytes > currentBytes) {
+      const resizeResult = await runQemuImg(['resize', disk.source, `${nextSizeGiB}G`], {
+        timeout: 30000,
+      })
+      if (!resizeResult.success) {
+        throw new Error(resizeResult.stderr || resizeResult.stdout || '磁盘扩容失败')
+      }
+    }
+  }
+
+  if (definitionChanged) {
+    await defineVmPersistentXml(vmName, buildVmDomainXml(domain), 'update-disk')
+  }
+
+  return { message: '磁盘配置已更新' }
+}
+
+export const addVMDataDisk = async (vmName, payload) => {
+  const { info, domain } = await getVmDomainState(vmName)
+  ensureVmStoppedForConfig(info)
+
+  const path = typeof payload?.path === 'string' ? payload.path.trim() : ''
+  const format = payload?.format === 'raw' ? 'raw' : 'qcow2'
+  const bus = normalizeDiskBus(payload?.bus)
+  const sizeGiB = Math.max(1, Math.round(Number(payload?.sizeGiB) || 0))
+
+  if (!path) {
+    throw new HttpError(400, '请填写数据磁盘路径')
+  }
+  ensureAbsolutePath(path, '数据磁盘路径')
+  if (!Number.isFinite(sizeGiB) || sizeGiB < 1) {
+    throw new HttpError(400, '数据磁盘容量至少为 1 GiB')
+  }
+  if (await sudoTest('-e', path)) {
+    throw new HttpError(400, '目标数据磁盘路径已存在')
+  }
+
+  const parentDir = dirname(path)
+  if (!(await sudoTest('-d', parentDir))) {
+    throw new HttpError(400, '目标数据磁盘目录不存在')
+  }
+
+  const requiredBytes = Math.round(sizeGiB * 1024 * 1024 * 1024)
+  const availableBytes = await getFilesystemAvailableBytes(parentDir)
+  if (availableBytes && requiredBytes > availableBytes) {
+    throw new HttpError(400, `目录 ${parentDir} 剩余空间不足，当前可用 ${formatBytes(availableBytes)}`)
+  }
+
+  const createResult = await runQemuImg(['create', '-f', format, path, `${sizeGiB}G`], {
+    timeout: 30000,
+  })
+  if (!createResult.success) {
+    throw new Error(createResult.stderr || createResult.stdout || '创建数据磁盘失败')
+  }
+
+  try {
+    const target = addVmDataDisk(domain, {
+      path,
+      format,
+      bus,
+    })
+    await defineVmPersistentXml(vmName, buildVmDomainXml(domain), 'data-disk')
+    return {
+      message: '数据磁盘添加成功',
+      target,
+    }
+  } catch (error) {
+    await safeRemoveFile(path)
+    throw error
+  }
+}
+
+export const addVMCdromDevice = async (vmName, payload) => {
+  const { info, domain } = await getVmDomainState(vmName)
+  ensureVmStoppedForConfig(info)
+
+  const path = typeof payload?.path === 'string' ? payload.path.trim() : ''
+  const bus = normalizeCdromBus(payload?.bus)
+
+  if (!path) {
+    throw new HttpError(400, '请填写 ISO 路径')
+  }
+  ensureAbsolutePath(path, 'ISO 路径')
+  if (!(await sudoTest('-r', path))) {
+    throw new HttpError(400, '指定的 ISO 文件不存在或不可读')
+  }
+
+  const target = addVmCdrom(domain, {
+    path,
+    bus,
+  })
+  await defineVmPersistentXml(vmName, buildVmDomainXml(domain), 'add-cdrom')
+  return {
+    message: 'CDROM 设备添加成功',
+    target,
+  }
+}
+
+export const deleteVMDisk = async (vmName, target, payload = {}) => {
+  const { info, domain } = await getVmDomainState(vmName)
+  ensureVmStoppedForConfig(info)
+
+  const normalizedTarget = String(target || '').trim()
+  if (!normalizedTarget) {
+    throw new HttpError(400, '缺少磁盘设备标识')
+  }
+
+  const disk = getVmDiskSummaries(domain).find((item) => item.target === normalizedTarget)
+  if (!disk) {
+    throw new HttpError(404, '未找到可删除的磁盘')
+  }
+
+  const deleteFile = Boolean(payload?.deleteFile)
+  if (deleteFile && (disk.sourceType !== 'file' || !disk.source)) {
+    throw new HttpError(400, '当前磁盘不支持删除底层磁盘文件')
+  }
+
+  const removed = removeVmDisk(domain, normalizedTarget)
+  if (!removed) {
+    throw new HttpError(404, '未找到可删除的磁盘')
+  }
+
+  await defineVmPersistentXml(vmName, buildVmDomainXml(domain), 'delete-disk')
+
+  if (deleteFile && disk.source) {
+    try {
+      await safeRemoveFile(disk.source)
+      return { message: '磁盘已移除，磁盘文件已删除' }
+    } catch (error) {
+      console.error('删除磁盘文件失败:', error)
+      return { message: '磁盘已移除，但磁盘文件删除失败' }
+    }
+  }
+
+  return { message: '磁盘已移除' }
+}
+
+export const addVMNetworkInterface = async (vmName, payload) => {
+  const { info, domain } = await getVmDomainState(vmName)
+  ensureVmStoppedForConfig(info)
+
+  const source = typeof payload?.source === 'string' ? payload.source.trim() : ''
+  if (!source) {
+    throw new HttpError(400, '请选择桥接网卡')
+  }
+
+  const capabilities = await getVmCapabilitiesInternal()
+  const bridge = capabilities.bridgeInterfaces.find((item) => item.name === source)
+  if (!bridge) {
+    throw new HttpError(400, `桥接网卡 ${source} 不存在`)
+  }
+
+  const macSet = new Set(
+    getVmNetworkSummaries(domain)
+      .map((item) => String(item.mac || '').toLowerCase())
+      .filter(Boolean)
+  )
+  const mac = createRandomVmMacAddress(macSet)
+
+  addVmBridgeInterface(domain, {
+    source,
+    mac,
+  })
+  await defineVmPersistentXml(vmName, buildVmDomainXml(domain), 'add-nic')
+  return { message: '网卡添加成功', mac }
+}
+
+export const updateVMNetworkInterfaceConfig = async (vmName, mac, payload) => {
+  const { info, domain } = await getVmDomainState(vmName)
+  ensureVmStoppedForConfig(info)
+
+  const source = typeof payload?.source === 'string' ? payload.source.trim() : ''
+  if (!source) {
+    throw new HttpError(400, '请选择桥接网卡')
+  }
+
+  const capabilities = await getVmCapabilitiesInternal()
+  const bridge = capabilities.bridgeInterfaces.find((item) => item.name === source)
+  if (!bridge) {
+    throw new HttpError(400, `桥接网卡 ${source} 不存在`)
+  }
+
+  const updated = updateVmBridgeInterface(domain, mac, source)
+  if (!updated) {
+    throw new HttpError(404, '未找到指定的网卡')
+  }
+
+  await defineVmPersistentXml(vmName, buildVmDomainXml(domain), 'update-nic')
+  return { message: '网卡配置已更新' }
+}
+
+export const deleteVMNetworkInterface = async (vmName, mac) => {
+  const { info, domain } = await getVmDomainState(vmName)
+  ensureVmStoppedForConfig(info)
+
+  const removed = removeVmInterface(domain, mac)
+  if (!removed) {
+    throw new HttpError(404, '未找到指定的网卡')
+  }
+
+  await defineVmPersistentXml(vmName, buildVmDomainXml(domain), 'delete-nic')
+  return { message: '网卡已移除' }
+}
+
+export const ejectVMCdromMedia = async (vmName) => {
+  const { info, domain } = await getVmDomainState(vmName)
+  ensureVmStoppedForConfig(info)
+
+  const cdrom = getVmCdrom(domain)
+  if (!cdrom) {
+    throw new HttpError(404, '当前虚拟机未配置光驱')
+  }
+  if (!cdrom.source) {
+    return { message: 'ISO 已弹出' }
+  }
+
+  ejectVmCdrom(domain)
+  await defineVmPersistentXml(vmName, buildVmDomainXml(domain), 'eject-cdrom')
+  return { message: 'ISO 已弹出' }
+}
+
+export const ejectVMCdromMediaByTarget = async (vmName, target) => {
+  const { info, domain } = await getVmDomainState(vmName)
+  ensureVmStoppedForConfig(info)
+
+  const normalizedTarget = String(target || '').trim()
+  if (!normalizedTarget) {
+    throw new HttpError(400, '缺少光驱设备标识')
+  }
+
+  const cdrom = getVmCdroms(domain).find((item) => item.target === normalizedTarget)
+  if (!cdrom) {
+    throw new HttpError(404, '未找到指定光驱')
+  }
+  if (!cdrom.source) {
+    return { message: 'ISO 已弹出' }
+  }
+
+  ejectVmCdromByTarget(domain, normalizedTarget)
+  await defineVmPersistentXml(vmName, buildVmDomainXml(domain), 'eject-cdrom')
+  return { message: 'ISO 已弹出' }
+}
+
+export const insertVMCdromMedia = async (vmName, payload) => {
+  const { info, domain } = await getVmDomainState(vmName)
+  ensureVmStoppedForConfig(info)
+
+  const path = typeof payload?.path === 'string' ? payload.path.trim() : ''
+  if (!path) {
+    throw new HttpError(400, '请填写 ISO 路径')
+  }
+  ensureAbsolutePath(path, 'ISO 路径')
+  if (!(await sudoTest('-r', path))) {
+    throw new HttpError(400, '指定的 ISO 文件不存在或不可读')
+  }
+
+  upsertVmCdrom(domain, {
+    path,
+    bus: normalizeCdromBus(payload?.bus, getVmCdrom(domain)?.bus || 'sata'),
+  })
+  await defineVmPersistentXml(vmName, buildVmDomainXml(domain), 'insert-cdrom')
+  return { message: 'ISO 已插入' }
+}
+
+export const insertVMCdromMediaByTarget = async (vmName, target, payload) => {
+  const { info, domain } = await getVmDomainState(vmName)
+  ensureVmStoppedForConfig(info)
+
+  const normalizedTarget = String(target || '').trim()
+  if (!normalizedTarget) {
+    throw new HttpError(400, '缺少光驱设备标识')
+  }
+
+  const path = typeof payload?.path === 'string' ? payload.path.trim() : ''
+  if (!path) {
+    throw new HttpError(400, '请填写 ISO 路径')
+  }
+  ensureAbsolutePath(path, 'ISO 路径')
+  if (!(await sudoTest('-r', path))) {
+    throw new HttpError(400, '指定的 ISO 文件不存在或不可读')
+  }
+
+  const updated = insertVmCdromMediaByTarget(domain, normalizedTarget, { path })
+  if (!updated) {
+    throw new HttpError(404, '未找到指定光驱')
+  }
+
+  await defineVmPersistentXml(vmName, buildVmDomainXml(domain), 'insert-cdrom')
+  return { message: 'ISO 已插入' }
+}
+
+export const deleteVMCdrom = async (vmName) => {
+  const { info, domain } = await getVmDomainState(vmName)
+  ensureVmStoppedForConfig(info)
+
+  const removed = removeVmCdrom(domain)
+  if (!removed) {
+    throw new HttpError(404, '当前虚拟机未配置光驱')
+  }
+
+  if (getVmBootOrder(domain) === 'cdrom_first') {
+    setVmBootOrder(domain, 'disk_first')
+  }
+
+  await defineVmPersistentXml(vmName, buildVmDomainXml(domain), 'delete-cdrom')
+  return { message: '光驱已删除' }
+}
+
+export const deleteVMCdromByTarget = async (vmName, target) => {
+  const { info, domain } = await getVmDomainState(vmName)
+  ensureVmStoppedForConfig(info)
+
+  const normalizedTarget = String(target || '').trim()
+  if (!normalizedTarget) {
+    throw new HttpError(400, '缺少光驱设备标识')
+  }
+
+  const removed = removeVmCdromByTarget(domain, normalizedTarget)
+  if (!removed) {
+    throw new HttpError(404, '未找到指定光驱')
+  }
+
+  if (getVmBootOrder(domain) === 'cdrom_first' && getVmCdroms(domain).length === 0) {
+    setVmBootOrder(domain, 'disk_first')
+  }
+
+  await defineVmPersistentXml(vmName, buildVmDomainXml(domain), 'delete-cdrom')
+  return { message: '光驱已删除' }
+}
+
+export const updateVMBootOrder = async (vmName, payload) => {
+  const { info, domain } = await getVmDomainState(vmName)
+  ensureVmStoppedForConfig(info)
+
+  const mode = payload?.mode === 'cdrom_first' ? 'cdrom_first' : payload?.mode === 'disk_first' ? 'disk_first' : ''
+  if (!mode) {
+    throw new HttpError(400, '不支持的引导顺序')
+  }
+  if (mode === 'cdrom_first' && !getVmCdrom(domain)) {
+    throw new HttpError(400, '当前虚拟机未配置光驱')
+  }
+
+  setVmBootOrder(domain, mode)
+  await defineVmPersistentXml(vmName, buildVmDomainXml(domain), 'boot-order')
+  return { message: '引导顺序已更新' }
 }
 
 /**
@@ -1350,6 +2054,26 @@ export const stopVM = async (vmName) => {
     throw new Error(result.stderr || result.stdout || '停止虚拟机失败')
   }
   return { message: '虚拟机停止成功' }
+}
+
+/**
+ * 强制断电虚拟机
+ */
+export const powerOffVM = async (vmName) => {
+  const info = await getVmDominfo(vmName)
+  if (!info) {
+    throw new Error(`虚拟机 ${vmName} 不存在`)
+  }
+
+  if (normalizeVmStatus(info.State) === 'stopped') {
+    return { message: '虚拟机已停止' }
+  }
+
+  const result = await runVirsh(['destroy', vmName], { timeout: 20000 })
+  if (!result.success) {
+    throw new Error(result.stderr || result.stdout || '虚拟机断电失败')
+  }
+  return { message: '虚拟机已断电' }
 }
 
 /**

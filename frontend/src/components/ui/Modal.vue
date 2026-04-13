@@ -6,7 +6,7 @@
     >
       <div
         v-if="!isFullscreen"
-        class="fixed inset-0 h-full w-full bg-gray-400/50 backdrop-blur-[32px]"
+        :class="overlayClasses"
         @click="handleClose"
       ></div>
       <div
@@ -48,12 +48,14 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 interface ModalProps {
   isOpen: boolean
   className?: string
+  overlayClassName?: string
   showCloseButton?: boolean
   isFullscreen?: boolean
 }
 
 const props = withDefaults(defineProps<ModalProps>(), {
   className: '',
+  overlayClassName: '',
   showCloseButton: true,
   isFullscreen: false
 })
@@ -82,12 +84,55 @@ const contentClasses = computed(() => {
   return `${baseClasses} ${props.className}`
 })
 
-// Handle body overflow
-watch(() => props.isOpen, (isOpen) => {
+const overlayClasses = computed(() => {
+  if (props.overlayClassName) {
+    return `fixed inset-0 h-full w-full ${props.overlayClassName}`
+  }
+
+  return 'fixed inset-0 h-full w-full bg-gray-400/50 backdrop-blur-[32px]'
+})
+
+const lockBodyScroll = () => {
+  const body = document.body
+  const lockCount = Number(body.dataset.modalLockCount || '0')
+
+  if (lockCount === 0) {
+    body.dataset.modalOriginalOverflow = body.style.overflow
+    body.dataset.modalOriginalPaddingRight = body.style.paddingRight
+
+    const scrollbarWidth = Math.max(0, window.innerWidth - document.documentElement.clientWidth)
+    body.style.overflow = 'hidden'
+    body.style.paddingRight = scrollbarWidth > 0 ? `${scrollbarWidth}px` : body.dataset.modalOriginalPaddingRight || ''
+  }
+
+  body.dataset.modalLockCount = String(lockCount + 1)
+}
+
+const unlockBodyScroll = () => {
+  const body = document.body
+  const lockCount = Number(body.dataset.modalLockCount || '0')
+
+  if (lockCount <= 1) {
+    body.style.overflow = body.dataset.modalOriginalOverflow || ''
+    body.style.paddingRight = body.dataset.modalOriginalPaddingRight || ''
+    delete body.dataset.modalLockCount
+    delete body.dataset.modalOriginalOverflow
+    delete body.dataset.modalOriginalPaddingRight
+    return
+  }
+
+  body.dataset.modalLockCount = String(lockCount - 1)
+}
+
+watch(() => props.isOpen, (isOpen, wasOpen) => {
+  if (isOpen === wasOpen) {
+    return
+  }
+
   if (isOpen) {
-    document.body.style.overflow = 'hidden'
+    lockBodyScroll()
   } else {
-    document.body.style.overflow = 'unset'
+    unlockBodyScroll()
   }
 })
 
@@ -97,6 +142,8 @@ onMounted(() => {
 
 onUnmounted(() => {
   document.removeEventListener('keydown', handleEscape)
-  document.body.style.overflow = 'unset'
+  if (props.isOpen) {
+    unlockBodyScroll()
+  }
 })
 </script>
