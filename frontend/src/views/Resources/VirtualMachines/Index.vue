@@ -496,6 +496,7 @@
                         断电
                       </button>
                       <button
+                        v-if="vm.status === 'running'"
                         @click="restartVM(vm.name)"
                         class="px-2 py-1 text-xs bg-warning-600 dark:bg-warning-500 text-white rounded hover:bg-warning-700 dark:hover:bg-warning-600 transition-colors whitespace-nowrap"
                         :title="$t('common.restart')"
