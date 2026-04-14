@@ -69,6 +69,79 @@ const getDiskCapacityGiB = (capacityBytes) => {
   return Math.max(1, Math.round(capacityBytes / 1024 / 1024 / 1024))
 }
 
+const getBootOrderValue = (device) => {
+  const order = Number(toArray(device?.boot)[0]?.['@_order'])
+  return Number.isFinite(order) && order > 0 ? order : null
+}
+
+const isVmBootableDevice = (device) => device?.['@_device'] === 'disk' || device?.['@_device'] === 'cdrom'
+
+const getVmBootDeviceKey = (device) =>
+  `${String(device?.['@_device'] || '').trim()}:${String(device?.target?.['@_dev'] || '').trim()}`
+
+const getVmBootDeviceDescriptors = (domain) => {
+  return getVmDomainDisks(domain)
+    .map((device, index) => {
+      if (!isVmBootableDevice(device)) return null
+      const target = String(device?.target?.['@_dev'] || '').trim()
+      if (!target) return null
+      return {
+        index,
+        key: getVmBootDeviceKey(device),
+        target,
+        device: device?.['@_device'] === 'cdrom' ? 'cdrom' : 'disk',
+        bus: String(device?.target?.['@_bus'] || '').trim(),
+        bootOrder: getBootOrderValue(device),
+      }
+    })
+    .filter(Boolean)
+}
+
+const getVmResolvedBootDeviceDescriptors = (domain) => {
+  const descriptors = getVmBootDeviceDescriptors(domain)
+  if (descriptors.length === 0) return []
+
+  const explicit = descriptors.filter((item) => item.bootOrder !== null)
+  if (explicit.length > 0) {
+    const ordered = explicit
+      .slice()
+      .sort((left, right) => {
+        if ((left.bootOrder || 0) !== (right.bootOrder || 0)) {
+          return (left.bootOrder || 0) - (right.bootOrder || 0)
+        }
+        return left.index - right.index
+      })
+    const usedKeys = new Set(ordered.map((item) => item.key))
+    return [...ordered, ...descriptors.filter((item) => !usedKeys.has(item.key))]
+  }
+
+  const osBootEntries = toArray(domain?.os?.boot)
+    .map((item) => String(item?.['@_dev'] || '').trim().toLowerCase())
+    .filter(Boolean)
+
+  if (osBootEntries.length > 0) {
+    const preferredTypes = []
+    for (const entry of osBootEntries) {
+      if (entry === 'hd' && !preferredTypes.includes('disk')) preferredTypes.push('disk')
+      if (entry === 'cdrom' && !preferredTypes.includes('cdrom')) preferredTypes.push('cdrom')
+    }
+
+    const ordered = []
+    const usedKeys = new Set()
+    for (const preferredType of preferredTypes) {
+      for (const descriptor of descriptors) {
+        if (descriptor.device !== preferredType || usedKeys.has(descriptor.key)) continue
+        ordered.push(descriptor)
+        usedKeys.add(descriptor.key)
+      }
+    }
+
+    return [...ordered, ...descriptors.filter((item) => !usedKeys.has(item.key))]
+  }
+
+  return descriptors
+}
+
 const normalizeDiskBus = (bus) => (bus === 'sata' || bus === 'scsi' ? bus : 'virtio')
 
 const normalizeCdromBus = (bus) => (bus === 'scsi' ? 'scsi' : 'sata')
@@ -94,6 +167,26 @@ export const parseVmDomainXml = (xml) => {
 }
 
 export const buildVmDomainXml = (domain) => {
+  domain.devices = domain.devices || {}
+
+  const channels = toArray(domain.devices.channel)
+  const hasGuestAgentChannel = channels.some(
+    (channel) =>
+      channel?.target?.['@_type'] === 'virtio' &&
+      String(channel?.target?.['@_name'] || '').trim() === 'org.qemu.guest_agent.0'
+  )
+
+  if (!hasGuestAgentChannel) {
+    channels.push({
+      '@_type': 'unix',
+      target: {
+        '@_type': 'virtio',
+        '@_name': 'org.qemu.guest_agent.0',
+      },
+    })
+    setArrayValue(domain.devices, 'channel', channels)
+  }
+
   return xmlBuilder.build({ domain })
 }
 
@@ -164,35 +257,73 @@ export const getVmMemoryKiB = (domain, fallbackKiB = 0) => {
 }
 
 export const getVmBootOrder = (domain) => {
-  const osBootEntries = toArray(domain?.os?.boot)
-    .map((item) => String(item?.['@_dev'] || '').trim().toLowerCase())
-    .filter(Boolean)
+  const firstDevice = getVmResolvedBootDeviceDescriptors(domain)[0]
+  if (!firstDevice) return 'unknown'
+  return firstDevice.device === 'cdrom' ? 'cdrom_first' : 'disk_first'
+}
 
-  if (osBootEntries.length >= 2) {
-    if (osBootEntries[0] === 'hd' && osBootEntries.includes('cdrom')) return 'disk_first'
-    if (osBootEntries[0] === 'cdrom' && osBootEntries.includes('hd')) return 'cdrom_first'
-  }
+export const getVmBootTarget = (domain) => {
+  return getVmResolvedBootDeviceDescriptors(domain)[0]?.target || null
+}
 
-  const diskOrders = []
-  const cdromOrders = []
-  for (const disk of getVmDomainDisks(domain)) {
-    const order = Number(toArray(disk?.boot)[0]?.['@_order'])
-    if (!Number.isFinite(order) || order < 1) continue
-    if (disk?.['@_device'] === 'disk') {
-      diskOrders.push(order)
-    } else if (disk?.['@_device'] === 'cdrom') {
-      cdromOrders.push(order)
+export const getVmBootDevices = (domain) => {
+  return getVmResolvedBootDeviceDescriptors(domain).map((device, index) => ({
+    target: device.target,
+    device: device.device,
+    bus: device.bus,
+    order: index + 1,
+  }))
+}
+
+export const setVmBootTarget = (domain, target) => {
+  const normalizedTarget = String(target || '').trim()
+  if (!normalizedTarget) return false
+
+  const resolvedDevices = getVmResolvedBootDeviceDescriptors(domain)
+  const primaryDevice = resolvedDevices.find((item) => item.target === normalizedTarget)
+  if (!primaryDevice) return false
+
+  const orderedKeys = [
+    primaryDevice.key,
+    ...resolvedDevices.filter((item) => item.key !== primaryDevice.key).map((item) => item.key),
+  ]
+  const orderByKey = new Map(orderedKeys.map((key, index) => [key, index + 1]))
+  const disks = getVmDomainDisks(domain).map((disk) => {
+    const next = { ...disk }
+    if (isVmBootableDevice(disk)) {
+      const order = orderByKey.get(getVmBootDeviceKey(disk))
+      if (order) {
+        next.boot = {
+          '@_order': String(order),
+        }
+      } else {
+        delete next.boot
+      }
+    } else {
+      delete next.boot
     }
-  }
+    return next
+  })
 
-  if (diskOrders.length > 0 && cdromOrders.length > 0) {
-    return Math.min(...diskOrders) < Math.min(...cdromOrders) ? 'disk_first' : 'cdrom_first'
+  if (domain.os && 'boot' in domain.os) {
+    delete domain.os.boot
   }
-
-  return 'unknown'
+  setVmDomainDisks(domain, disks)
+  return true
 }
 
 export const setVmBootOrder = (domain, mode) => {
+  const resolvedDevices = getVmResolvedBootDeviceDescriptors(domain)
+  const selectedDevice =
+    mode === 'cdrom_first'
+      ? resolvedDevices.find((item) => item.device === 'cdrom')
+      : resolvedDevices.find((item) => item.device === 'disk')
+
+  if (selectedDevice) {
+    setVmBootTarget(domain, selectedDevice.target)
+    return
+  }
+
   domain.os = domain.os || {}
   domain.os.boot =
     mode === 'cdrom_first'
@@ -458,6 +589,7 @@ export const updateVmSystemDiskBus = (domain, bus) => {
       '@_dev': allocateVmDiskTarget(domain, nextBus, disks[index]),
     },
   }
+  delete next.address
   disks[index] = next
   setVmDomainDisks(domain, disks)
   return next
@@ -477,6 +609,7 @@ export const updateVmDiskBus = (domain, target, bus) => {
       '@_dev': allocateVmDiskTarget(domain, nextBus, disks[index]),
     },
   }
+  delete next.address
   disks[index] = next
   setVmDomainDisks(domain, disks)
   return next

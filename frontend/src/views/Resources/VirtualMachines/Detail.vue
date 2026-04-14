@@ -22,6 +22,7 @@
                   {{ vmName }}
                 </h1>
                 <span
+                  v-if="detailHeaderReady"
                   :class="[
                     'inline-flex rounded-full px-3 py-1 text-sm font-medium',
                     vm.status === 'running'
@@ -34,7 +35,7 @@
                   {{ statusLabel }}
                 </span>
                 <span
-                  v-if="!canEditConfig"
+                  v-if="detailHeaderReady && !canEditConfig"
                   class="inline-flex rounded-full bg-warning-500/10 px-3 py-1 text-sm text-warning-700 dark:text-warning-300"
                 >
                   运行中仅可查看配置
@@ -42,7 +43,7 @@
               </div>
             </div>
 
-            <div class="flex flex-wrap justify-end gap-2">
+            <div v-if="detailHeaderReady" class="flex flex-wrap justify-end gap-2">
               <button
                 v-if="vm.status === 'stopped'"
                 @click="startVM"
@@ -185,7 +186,7 @@
                     <p class="text-sm font-medium text-gray-800 dark:text-white/90">启动顺序</p>
                     <p class="min-w-0 text-sm text-gray-600 dark:text-gray-400">{{ bootOrderLabel }}</p>
                     <button
-                      :disabled="!canEditConfig"
+                      :disabled="!canEditConfig || bootDevices.length === 0"
                       @click="openBootEditor"
                       class="text-sm text-brand-600 hover:text-brand-700 disabled:cursor-not-allowed disabled:opacity-40 dark:text-brand-400"
                     >
@@ -233,7 +234,7 @@
                   <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">每 5 秒刷新一次资源状态</p>
                 </div>
                 <span class="text-xs text-gray-500 dark:text-gray-400">
-                  {{ vm.status === 'running' ? '虚机运行中' : '虚机未运行，显示最近数据' }}
+                  {{ vm.status === 'running' ? '虚机运行中' : '虚机未运行，监控数据已清空' }}
                 </span>
               </div>
 
@@ -251,7 +252,7 @@
                 <div class="rounded-lg border border-gray-200 bg-gray-50/80 p-3 dark:border-gray-700 dark:bg-white/[0.02] xl:flex xl:min-h-0 xl:flex-col">
                   <div class="mb-2 flex items-center justify-between">
                     <h3 class="text-sm font-semibold text-gray-800 dark:text-white/90">内存状态</h3>
-                    <span class="text-sm font-medium text-gray-800 dark:text-white/90">{{ vm.memoryUsage || 0 }}%</span>
+                    <span class="text-sm font-medium text-gray-800 dark:text-white/90">{{ memoryMonitorValueLabel }}</span>
                   </div>
                   <div class="min-h-[72px] xl:min-h-0 xl:flex-1">
                     <VueApexCharts type="area" height="100%" :options="memoryChartOptions" :series="memoryChartSeries" />
@@ -306,7 +307,20 @@
                 </thead>
                 <tbody class="divide-y divide-gray-200 dark:divide-gray-800">
                   <tr v-for="cdrom in cdromDevices" :key="`cdrom-${cdrom.target}`">
-                    <td class="px-4 py-3 font-medium text-gray-800 dark:text-white/90">cdrom</td>
+                    <td class="px-4 py-3 font-medium text-gray-800 dark:text-white/90">
+                      <div class="flex flex-wrap items-center gap-2">
+                        <span>{{ cdrom.target || 'cdrom' }}</span>
+                        <span class="inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600 dark:bg-white/5 dark:text-gray-400">
+                          光驱
+                        </span>
+                        <span
+                          v-if="isBootTarget(cdrom.target)"
+                          class="inline-flex rounded-full bg-brand-500/10 px-2 py-0.5 text-xs text-brand-600 dark:text-brand-300"
+                        >
+                          首启
+                        </span>
+                      </div>
+                    </td>
                     <td class="px-4 py-3 text-gray-600 dark:text-gray-400">
                       {{ formatStorageBytes(cdrom.actualSizeBytes) }}
                     </td>
@@ -340,7 +354,20 @@
 
                   <template v-if="systemDisk">
                     <tr>
-                      <td class="px-4 py-3 font-medium text-gray-800 dark:text-white/90">{{ systemDisk.target }}</td>
+                      <td class="px-4 py-3 font-medium text-gray-800 dark:text-white/90">
+                        <div class="flex flex-wrap items-center gap-2">
+                          <span>{{ systemDisk.target }}</span>
+                          <span class="inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600 dark:bg-white/5 dark:text-gray-400">
+                            {{ diskRoleLabel(systemDisk.role) }}
+                          </span>
+                          <span
+                            v-if="isBootTarget(systemDisk.target)"
+                            class="inline-flex rounded-full bg-brand-500/10 px-2 py-0.5 text-xs text-brand-600 dark:text-brand-300"
+                          >
+                            首启
+                          </span>
+                        </div>
+                      </td>
                       <td class="px-4 py-3 text-gray-600 dark:text-gray-400">
                         {{ formatStorageBytes(systemDisk.actualSizeBytes) }}
                       </td>
@@ -374,7 +401,20 @@
                   </template>
 
                   <tr v-for="disk in dataDisks" :key="disk.target">
-                    <td class="px-4 py-3 font-medium text-gray-800 dark:text-white/90">{{ disk.target }}</td>
+                    <td class="px-4 py-3 font-medium text-gray-800 dark:text-white/90">
+                      <div class="flex flex-wrap items-center gap-2">
+                        <span>{{ disk.target }}</span>
+                        <span class="inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600 dark:bg-white/5 dark:text-gray-400">
+                          {{ diskRoleLabel(disk.role) }}
+                        </span>
+                        <span
+                          v-if="isBootTarget(disk.target)"
+                          class="inline-flex rounded-full bg-brand-500/10 px-2 py-0.5 text-xs text-brand-600 dark:text-brand-300"
+                        >
+                          首启
+                        </span>
+                      </div>
+                    </td>
                     <td class="px-4 py-3 text-gray-600 dark:text-gray-400">{{ formatStorageBytes(disk.actualSizeBytes) }}</td>
                     <td class="px-4 py-3 text-gray-600 dark:text-gray-400">{{ formatStorageBytes(disk.capacityBytes) }}</td>
                     <td class="px-4 py-3 text-gray-600 dark:text-gray-400">{{ disk.bus }}</td>
@@ -620,20 +660,28 @@
     >
       <div class="border-b border-gray-200 px-5 py-4 dark:border-gray-800">
         <h3 class="text-lg font-semibold text-gray-800 dark:text-white/90">编辑启动顺序</h3>
-        <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">选择虚机开机时优先使用的引导设备</p>
+        <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">选择虚机开机时优先尝试的引导设备</p>
       </div>
 
-      <div class="px-5 py-5">
+      <div class="space-y-3 px-5 py-5">
         <div class="flex flex-wrap items-center gap-3">
           <label class="text-sm text-gray-600 dark:text-gray-400">启动顺序</label>
           <select
-            v-model="bootOrderForm"
-            class="w-40 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-gray-600 dark:bg-gray-700 dark:text-white/90"
+            v-model="bootTargetForm"
+            class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 sm:w-72 dark:border-gray-600 dark:bg-gray-700 dark:text-white/90"
           >
-            <option value="disk_first">磁盘优先</option>
-            <option value="cdrom_first">光驱优先</option>
+            <option v-for="device in bootDevices" :key="device.target" :value="device.target">
+              {{ device.label }}
+            </option>
           </select>
         </div>
+        <p v-if="selectedBootDevice" class="text-sm text-gray-600 dark:text-gray-400">
+          当前将优先从 {{ selectedBootDevice.label }} 引导，其余设备按现有顺序继续尝试。
+        </p>
+        <p v-if="selectedBootDevice?.hint" class="text-xs text-gray-500 dark:text-gray-400">
+          {{ selectedBootDevice.hint }}
+        </p>
+        <p v-else-if="!selectedBootDevice" class="text-sm text-gray-500 dark:text-gray-400">当前没有可引导设备。</p>
       </div>
 
       <div class="flex justify-end gap-2 border-t border-gray-200 px-5 py-4 dark:border-gray-800">
@@ -645,7 +693,7 @@
         </button>
         <button
           @click="saveBootOrder"
-          :disabled="bootSaving"
+          :disabled="bootSaving || !bootTargetForm"
           class="rounded-lg bg-brand-500 px-3 py-2 text-sm text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60"
         >
           保存
@@ -1066,6 +1114,8 @@ const vm = ref<VMDetailViewModel>({
   cdrom: null,
   cdroms: [],
   bootOrder: 'unknown',
+  bootTarget: null,
+  bootDevices: [],
   editable: {
     cpuMemory: false,
     disks: false,
@@ -1134,7 +1184,7 @@ const newDiskForm = ref<{
   bus: 'virtio',
 })
 
-const bootOrderForm = ref<'disk_first' | 'cdrom_first'>('disk_first')
+const bootTargetForm = ref('')
 const newNetworkSource = ref('')
 const networkDrafts = ref<Record<string, string>>({})
 
@@ -1146,6 +1196,26 @@ let leftPanelObserver: ResizeObserver | null = null
 
 const networkMbps = ref(0)
 const memoryCurrentKiB = ref(0)
+const memoryUsageSource = ref<'guest_agent' | 'configured' | 'cleared'>('cleared')
+
+const resetMonitoringState = (clearHistory = false) => {
+  vm.value.cpuUsage = 0
+  vm.value.memoryUsage = 0
+  vm.value.networkUsage = 0
+  networkMbps.value = 0
+  memoryCurrentKiB.value = 0
+  memoryUsageSource.value = 'cleared'
+  prevCpuTimeNs = null
+  prevAtMs = null
+  prevNetBytes = null
+
+  if (clearHistory) {
+    labels.value = []
+    cpuSeriesData.value = []
+    memorySeriesData.value = []
+    networkSeriesData.value = []
+  }
+}
 
 const pushPoint = (arr: number[], value: number, maxLen = 30) => {
   arr.push(value)
@@ -1250,6 +1320,10 @@ const canEditConfig = computed(() => {
   return Boolean(vm.value.editable?.cpuMemory)
 })
 
+const detailHeaderReady = computed(() => {
+  return !loading.value && !loadError.value
+})
+
 const statusLabel = computed(() => {
   if (vm.value.status === 'running') return '运行中'
   if (vm.value.status === 'paused') return '已暂停'
@@ -1296,10 +1370,86 @@ const activeCdrom = computed(() => {
   return cdromDevices.value.find((cdrom) => cdrom.target === activeCdromTarget.value) || null
 })
 
+const diskRoleLabel = (role?: string) => {
+  if (role === 'system') return '系统盘'
+  if (role === 'data') return '数据盘'
+  return '磁盘'
+}
+
+const getBootDeviceLabel = (target: string, device?: 'disk' | 'cdrom') => {
+  const disk = vm.value.disks.find((item) => item.target === target)
+  if (disk) {
+    return `${target} (${diskRoleLabel(disk.role)})`
+  }
+
+  const cdrom = cdromDevices.value.find((item) => item.target === target)
+  if (cdrom || device === 'cdrom') {
+    return `${target} (光驱)`
+  }
+
+  return target
+}
+
+const getBootDeviceHint = (target: string, device?: 'disk' | 'cdrom') => {
+  const disk = vm.value.disks.find((item) => item.target === target)
+  if (disk) {
+    return `${disk.bus || 'virtio'} / ${storageSourceLabel(disk.sourceType)}`
+  }
+
+  const cdrom = cdromDevices.value.find((item) => item.target === target)
+  if (cdrom || device === 'cdrom') {
+    return cdrom?.source || '未插入 ISO'
+  }
+
+  return '-'
+}
+
+const bootDevices = computed(() => {
+  const configuredDevices =
+    Array.isArray(vm.value.bootDevices) && vm.value.bootDevices.length > 0
+      ? vm.value.bootDevices
+          .slice()
+          .sort((left, right) => (left.order || 0) - (right.order || 0))
+      : [
+          ...vm.value.disks.map((disk, index) => ({
+            target: disk.target,
+            device: 'disk' as const,
+            bus: disk.bus,
+            order: index + 1,
+          })),
+          ...cdromDevices.value.map((cdrom, index) => ({
+            target: cdrom.target,
+            device: 'cdrom' as const,
+            bus: cdrom.bus,
+            order: vm.value.disks.length + index + 1,
+          })),
+        ]
+
+  return configuredDevices
+    .filter((device) => device.target)
+    .map((device) => ({
+      ...device,
+      label: getBootDeviceLabel(device.target, device.device),
+      hint: getBootDeviceHint(device.target, device.device),
+    }))
+})
+
+const currentBootDevice = computed(() => {
+  const currentTarget = vm.value.bootTarget || bootDevices.value[0]?.target || ''
+  return bootDevices.value.find((device) => device.target === currentTarget) || null
+})
+
+const selectedBootDevice = computed(() => {
+  return bootDevices.value.find((device) => device.target === bootTargetForm.value) || null
+})
+
 const bootOrderLabel = computed(() => {
+  if (currentBootDevice.value) {
+    return `${currentBootDevice.value.label} 优先`
+  }
   if (vm.value.bootOrder === 'disk_first') return '磁盘优先'
   if (vm.value.bootOrder === 'cdrom_first') return '光驱优先'
-  return '未识别'
+  return '未配置'
 })
 
 const editStatusLabel = computed(() => {
@@ -1315,11 +1465,23 @@ const basicInfoItems = computed(() => [
   { label: '网卡 / 数据盘', value: `${vm.value.networkInterfaces.length} / ${dataDisks.value.length}` },
 ])
 
-const memoryUsageWidth = computed(() => `${Math.max(0, Math.min(100, Number(vm.value.memoryUsage) || 0))}%`)
+const memoryUsageWidth = computed(() => {
+  if (memoryUsageSource.value !== 'guest_agent') {
+    return '0%'
+  }
+  return `${Math.max(0, Math.min(100, Number(vm.value.memoryUsage) || 0))}%`
+})
 
 const cpuUsageWidth = computed(() => `${Math.max(0, Math.min(100, Number(vm.value.cpuUsage) || 0))}%`)
 
 const memoryUsageValueLabel = computed(() => {
+  if (memoryUsageSource.value === 'configured') {
+    return `已配置 ${memoryLabel.value}`
+  }
+  if (memoryUsageSource.value !== 'guest_agent') {
+    return '未采集'
+  }
+
   const totalKiB = vm.value.memoryKiB || 0
   if (!totalKiB) {
     return `${vm.value.memoryUsage || 0}%`
@@ -1329,6 +1491,16 @@ const memoryUsageValueLabel = computed(() => {
   const usedLabel = usedGiB >= 10 ? usedGiB.toFixed(0) : usedGiB.toFixed(1)
   const totalLabel = totalGiB >= 10 ? totalGiB.toFixed(0) : totalGiB.toFixed(1)
   return `${usedLabel} / ${totalLabel} GiB`
+})
+
+const memoryMonitorValueLabel = computed(() => {
+  if (memoryUsageSource.value === 'configured') {
+    return memoryLabel.value
+  }
+  if (memoryUsageSource.value !== 'guest_agent') {
+    return '-'
+  }
+  return `${vm.value.memoryUsage || 0}%`
 })
 
 const cpuUsageValueLabel = computed(() => {
@@ -1366,6 +1538,10 @@ const formatStorageBytes = (bytes?: number | null) => {
 
   const fixed = size >= 10 || unitIndex === 0 ? 0 : 1
   return `${size.toFixed(fixed)} ${units[unitIndex]}`
+}
+
+const isBootTarget = (target?: string | null) => {
+  return Boolean(target) && currentBootDevice.value?.target === target
 }
 
 const networkStateLabel = () => {
@@ -1445,7 +1621,7 @@ const syncFormsFromVm = () => {
     }
   }
 
-  bootOrderForm.value = vm.value.bootOrder === 'cdrom_first' ? 'cdrom_first' : 'disk_first'
+  bootTargetForm.value = vm.value.bootTarget || bootDevices.value[0]?.target || ''
   newNetworkSource.value = bridgeInterfaces.value[0]?.name || ''
   networkDrafts.value = Object.fromEntries(
     vm.value.networkInterfaces
@@ -1488,12 +1664,16 @@ const refreshDetails = async (showLoading = false) => {
   loadError.value = ''
   try {
     const details = await virtualMachinesApi.getVMDetails(vmName.value)
+    const isRunning = details?.status === 'running'
     vm.value = {
       ...vm.value,
       ...details,
-      cpuUsage: vm.value.cpuUsage ?? 0,
-      memoryUsage: vm.value.memoryUsage ?? 0,
-      networkUsage: vm.value.networkUsage ?? 0,
+      cpuUsage: isRunning ? (vm.value.cpuUsage ?? 0) : 0,
+      memoryUsage: isRunning ? (vm.value.memoryUsage ?? 0) : 0,
+      networkUsage: isRunning ? (vm.value.networkUsage ?? 0) : 0,
+    }
+    if (!isRunning) {
+      resetMonitoringState(true)
     }
     syncFormsFromVm()
   } catch (error: any) {
@@ -1510,14 +1690,7 @@ const refreshDetails = async (showLoading = false) => {
 
 const refreshMonitoring = async () => {
   if (!vm.value || vm.value.status !== 'running') {
-    vm.value.cpuUsage = 0
-    vm.value.memoryUsage = 0
-    vm.value.networkUsage = 0
-    networkMbps.value = 0
-    memoryCurrentKiB.value = 0
-    prevCpuTimeNs = null
-    prevAtMs = null
-    prevNetBytes = null
+    resetMonitoringState(true)
     return
   }
 
@@ -1539,13 +1712,20 @@ const refreshMonitoring = async () => {
     prevCpuTimeNs = cpuTimeNs
     prevAtMs = now
 
-    const currentMemoryKiB = Number(monitoring.memoryUsage) || 0
-    memoryCurrentKiB.value = currentMemoryKiB
-    const memoryLimitKiB = vm.value.memoryKiB ?? parseKiB(vm.value.ram) ?? 0
-    if (memoryLimitKiB > 0) {
-      const memoryPercent = (currentMemoryKiB / memoryLimitKiB) * 100
-      vm.value.memoryUsage = Math.max(0, Math.min(100, Math.round(memoryPercent)))
+    if (monitoring.memorySource === 'guest_agent') {
+      memoryUsageSource.value = 'guest_agent'
+      const currentMemoryKiB = Number(monitoring.memoryUsage) || 0
+      memoryCurrentKiB.value = currentMemoryKiB
+      const memoryLimitKiB = vm.value.memoryKiB ?? parseKiB(vm.value.ram) ?? 0
+      if (memoryLimitKiB > 0) {
+        const memoryPercent = (currentMemoryKiB / memoryLimitKiB) * 100
+        vm.value.memoryUsage = Math.max(0, Math.min(100, Math.round(memoryPercent)))
+      } else {
+        vm.value.memoryUsage = 0
+      }
     } else {
+      memoryUsageSource.value = 'configured'
+      memoryCurrentKiB.value = 0
       vm.value.memoryUsage = 0
     }
 
@@ -1593,12 +1773,13 @@ const cancelMemoryEditor = () => {
 }
 
 const openBootEditor = () => {
+  syncFormsFromVm()
   bootEditing.value = true
 }
 
 const cancelBootEditor = () => {
   bootEditing.value = false
-  bootOrderForm.value = vm.value.bootOrder === 'cdrom_first' ? 'cdrom_first' : 'disk_first'
+  bootTargetForm.value = vm.value.bootTarget || bootDevices.value[0]?.target || ''
 }
 
 const saveCpuConfig = async () => {
@@ -1674,10 +1855,12 @@ const saveDiskConfig = async () => {
 }
 
 const saveBootOrder = async () => {
+  if (!bootTargetForm.value) return
+
   bootSaving.value = true
   try {
     await virtualMachinesApi.updateVMBootOrder(vmName.value, {
-      mode: bootOrderForm.value,
+      target: bootTargetForm.value,
     })
     bootEditing.value = false
     await refreshDetails()

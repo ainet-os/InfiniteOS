@@ -49,6 +49,13 @@ export interface VMDetails {
     actualSizeBytes?: number | null
   }>
   bootOrder?: 'disk_first' | 'cdrom_first' | 'unknown'
+  bootTarget?: string | null
+  bootDevices?: Array<{
+    target: string
+    device: 'disk' | 'cdrom'
+    bus?: string
+    order: number
+  }>
   editable?: {
     cpuMemory: boolean
     disks: boolean
@@ -85,6 +92,7 @@ export interface VMDetails {
 export interface VMMonitoring {
   cpuUsage: number
   memoryUsage: number
+  memorySource?: 'guest_agent' | 'configured'
   networkRx: number
   networkTx: number
   diskRead: number
@@ -268,7 +276,8 @@ export interface AddVMNetworkRequest {
 }
 
 export interface UpdateVMBootOrderRequest {
-  mode: 'disk_first' | 'cdrom_first'
+  mode?: 'disk_first' | 'cdrom_first'
+  target?: string
 }
 
 export interface InsertVMCdromRequest {

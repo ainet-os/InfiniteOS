@@ -11,7 +11,9 @@ import {
   buildVmDomainXml,
   ejectVmCdrom,
   ejectVmCdromByTarget,
+  getVmBootDevices,
   getVmBootOrder,
+  getVmBootTarget,
   getVmCdrom,
   getVmCdroms,
   getVmCpuTopology,
@@ -27,6 +29,7 @@ import {
   removeVmDataDisk,
   removeVmInterface,
   setVmBootOrder,
+  setVmBootTarget,
   updateVmDiskBus,
   updateVmBridgeInterface,
   updateVmCpuMemoryDomain,
@@ -37,6 +40,7 @@ import {
 const VM_JOB_RETENTION_MS = 24 * 60 * 60 * 1000
 const MAX_JOB_LOGS = 200
 const VM_JOBS = new Map()
+const VM_GUEST_OS_CACHE = new Map()
 
 const UEFI_FIRMWARE_CANDIDATES = [
   {
@@ -84,6 +88,319 @@ const parseDominfo = (stdout) => {
     if (key) info[key] = value
   }
   return info
+}
+
+const parseVirshStats = (stdout) => {
+  const stats = {}
+  const lines = String(stdout || '').split('\n')
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim()
+    if (!line) continue
+
+    const equalIndex = line.indexOf('=')
+    if (equalIndex !== -1) {
+      const key = line.slice(0, equalIndex).trim()
+      const value = line.slice(equalIndex + 1).trim()
+      if (key) stats[key] = value
+      continue
+    }
+
+    const parts = line.split(/\s+/, 2)
+    if (parts.length === 2 && parts[0]) {
+      stats[parts[0]] = parts[1]
+    }
+  }
+
+  return stats
+}
+
+const runGuestAgentCommand = async (vmName, command, timeoutSeconds = 5) => {
+  const result = await runVirsh(
+    ['qemu-agent-command', vmName, '--timeout', String(timeoutSeconds), JSON.stringify(command)],
+    {
+      timeout: Math.max(1000, (timeoutSeconds + 2) * 1000),
+    }
+  )
+
+  if (!result.success) {
+    throw new Error(result.stderr || result.stdout || 'guest agent 命令执行失败')
+  }
+
+  return JSON.parse(result.stdout || '{}')
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+const decodeGuestAgentBase64 = (value) => {
+  if (!value) return ''
+  try {
+    return Buffer.from(String(value), 'base64').toString('utf8')
+  } catch {
+    return ''
+  }
+}
+
+const runGuestExec = async (vmName, path, arg = [], timeoutMs = 8000) => {
+  const timeoutSeconds = Math.max(1, Math.ceil(timeoutMs / 1000))
+  const execResponse = await runGuestAgentCommand(
+    vmName,
+    {
+      execute: 'guest-exec',
+      arguments: {
+        path,
+        arg,
+        'capture-output': true,
+      },
+    },
+    timeoutSeconds
+  )
+
+  const pid = Number(execResponse?.return?.pid)
+  if (!Number.isInteger(pid) || pid <= 0) {
+    throw new Error('guest-exec 未返回有效进程号')
+  }
+
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const statusResponse = await runGuestAgentCommand(
+      vmName,
+      {
+        execute: 'guest-exec-status',
+        arguments: {
+          pid,
+        },
+      },
+      timeoutSeconds
+    )
+
+    const status = statusResponse?.return || {}
+    if (status.exited) {
+      return {
+        exitcode: Number(status.exitcode) || 0,
+        signal: status.signal,
+        stdout: decodeGuestAgentBase64(status['out-data']),
+        stderr: decodeGuestAgentBase64(status['err-data']),
+      }
+    }
+
+    await sleep(200)
+  }
+
+  throw new Error('guest-exec 执行超时')
+}
+
+const readGuestFile = async (vmName, path, maxBytes = 64 * 1024) => {
+  let handle = null
+
+  try {
+    const openResponse = await runGuestAgentCommand(vmName, {
+      execute: 'guest-file-open',
+      arguments: {
+        path,
+        mode: 'r',
+      },
+    })
+    handle = Number(openResponse?.return)
+    if (!Number.isInteger(handle) || handle < 0) {
+      throw new Error('guest-file-open 未返回有效句柄')
+    }
+
+    const readResponse = await runGuestAgentCommand(vmName, {
+      execute: 'guest-file-read',
+      arguments: {
+        handle,
+        count: maxBytes,
+      },
+    })
+
+    const encoded = readResponse?.return?.['buf-b64']
+    if (!encoded) {
+      return ''
+    }
+
+    return Buffer.from(String(encoded), 'base64').toString('utf8')
+  } finally {
+    if (handle !== null) {
+      try {
+        await runGuestAgentCommand(vmName, {
+          execute: 'guest-file-close',
+          arguments: {
+            handle,
+          },
+        })
+      } catch {
+        // ignore
+      }
+    }
+  }
+}
+
+const getCachedGuestOsFamily = async (vmName) => {
+  if (VM_GUEST_OS_CACHE.has(vmName)) {
+    return VM_GUEST_OS_CACHE.get(vmName)
+  }
+
+  try {
+    const osInfoResponse = await runGuestAgentCommand(vmName, {
+      execute: 'guest-get-osinfo',
+    })
+    const osInfo = osInfoResponse?.return || {}
+    const osText = [
+      osInfo.id,
+      osInfo.name,
+      osInfo['pretty-name'],
+      osInfo.variant,
+      osInfo['variant-id'],
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase()
+
+    const family = osText.includes('windows') || osText.includes('mswindows') ? 'windows' : 'linux'
+    VM_GUEST_OS_CACHE.set(vmName, family)
+    return family
+  } catch {
+    return null
+  }
+}
+
+const getLinuxGuestMemoryUsage = async (vmName) => {
+  try {
+    const meminfo = await readGuestFile(vmName, '/proc/meminfo')
+    if (!meminfo) {
+      return { source: 'configured', usedKiB: 0 }
+    }
+
+    const meminfoMap = new Map()
+    for (const line of meminfo.split('\n')) {
+      const match = line.match(/^([A-Za-z_()]+):\s+(\d+)\s+kB$/)
+      if (!match) continue
+      meminfoMap.set(match[1], Number(match[2]))
+    }
+
+    const totalKiB = meminfoMap.get('MemTotal')
+    let availableKiB = meminfoMap.get('MemAvailable')
+    if (availableKiB === undefined) {
+      const memFree = meminfoMap.get('MemFree') || 0
+      const buffers = meminfoMap.get('Buffers') || 0
+      const cached = meminfoMap.get('Cached') || 0
+      const reclaimable = meminfoMap.get('SReclaimable') || 0
+      const shmem = meminfoMap.get('Shmem') || 0
+      availableKiB = memFree + buffers + cached + reclaimable - shmem
+    }
+
+    if (!Number.isFinite(totalKiB) || totalKiB <= 0 || !Number.isFinite(availableKiB) || availableKiB < 0) {
+      return { source: 'configured', usedKiB: 0 }
+    }
+
+    return {
+      source: 'guest_agent',
+      usedKiB: Math.max(0, totalKiB - availableKiB),
+    }
+  } catch {
+    return { source: 'configured', usedKiB: 0 }
+  }
+}
+
+const parseWindowsMemoryNumbers = (stdout) => {
+  const content = String(stdout || '').trim()
+  if (!content) return null
+
+  const csvMatch = content.match(/(\d+)\s*,\s*(\d+)/)
+  if (csvMatch) {
+    const totalKiB = Number(csvMatch[1])
+    const freeKiB = Number(csvMatch[2])
+    if (Number.isFinite(totalKiB) && totalKiB > 0 && Number.isFinite(freeKiB) && freeKiB >= 0) {
+      return { totalKiB, freeKiB }
+    }
+  }
+
+  const totalMatch = content.match(/TotalVisibleMemorySize=(\d+)/i)
+  const freeMatch = content.match(/FreePhysicalMemory=(\d+)/i)
+  if (!totalMatch || !freeMatch) {
+    return null
+  }
+
+  const totalKiB = Number(totalMatch[1])
+  const freeKiB = Number(freeMatch[1])
+  if (!Number.isFinite(totalKiB) || totalKiB <= 0 || !Number.isFinite(freeKiB) || freeKiB < 0) {
+    return null
+  }
+
+  return { totalKiB, freeKiB }
+}
+
+const getWindowsGuestMemoryUsage = async (vmName) => {
+  const powerShellScript = [
+    '$os = if (Get-Command Get-CimInstance -ErrorAction SilentlyContinue) {',
+    '  Get-CimInstance Win32_OperatingSystem',
+    '} else {',
+    '  Get-WmiObject Win32_OperatingSystem',
+    '}',
+    'if ($null -eq $os) { exit 1 }',
+    "[Console]::Out.WriteLine('{0},{1}' -f $os.TotalVisibleMemorySize, $os.FreePhysicalMemory)",
+  ].join('; ')
+
+  try {
+    const result = await runGuestExec(
+      vmName,
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', powerShellScript],
+      10000
+    )
+    const parsed = result.exitcode === 0 ? parseWindowsMemoryNumbers(result.stdout) : null
+    if (parsed) {
+      return {
+        source: 'guest_agent',
+        usedKiB: Math.max(0, parsed.totalKiB - parsed.freeKiB),
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  try {
+    const result = await runGuestExec(
+      vmName,
+      'cmd.exe',
+      ['/c', 'wmic OS get TotalVisibleMemorySize,FreePhysicalMemory /value'],
+      10000
+    )
+    const parsed = result.exitcode === 0 ? parseWindowsMemoryNumbers(result.stdout) : null
+    if (parsed) {
+      return {
+        source: 'guest_agent',
+        usedKiB: Math.max(0, parsed.totalKiB - parsed.freeKiB),
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  return { source: 'configured', usedKiB: 0 }
+}
+
+const getGuestAgentMemoryUsage = async (vmName) => {
+  const cachedFamily = await getCachedGuestOsFamily(vmName)
+
+  if (cachedFamily === 'windows') {
+    return getWindowsGuestMemoryUsage(vmName)
+  }
+
+  const linuxMemory = await getLinuxGuestMemoryUsage(vmName)
+  if (linuxMemory.source === 'guest_agent') {
+    VM_GUEST_OS_CACHE.set(vmName, 'linux')
+    return linuxMemory
+  }
+
+  const windowsMemory = await getWindowsGuestMemoryUsage(vmName)
+  if (windowsMemory.source === 'guest_agent') {
+    VM_GUEST_OS_CACHE.set(vmName, 'windows')
+    return windowsMemory
+  }
+
+  return { source: 'configured', usedKiB: 0 }
 }
 
 const normalizeVmStatus = (state) => {
@@ -403,6 +720,8 @@ const buildVmInstallArgs = (request, diskPaths, options = {}) => {
     `detect=on,require=off,name=${request.osId}`,
     '--graphics',
     request.graphics === 'none' ? 'none' : 'vnc,listen=127.0.0.1',
+    '--channel',
+    'unix,target_type=virtio,name=org.qemu.guest_agent.0',
     '--serial',
     'pty',
     '--console',
@@ -630,18 +949,45 @@ const defineVmPersistentXml = async (vmName, xml, suffix = 'config') => {
   }
 }
 
-const getVmDiskCapacityBytes = async (vmName, target) => {
+const parseDomblkinfo = (stdout) => {
+  const stats = {}
+  for (const rawLine of String(stdout || '').split('\n')) {
+    const line = rawLine.trim()
+    if (!line) continue
+    const match = line.match(/^([A-Za-z]+):\s*(\d+)$/)
+    if (!match) continue
+    stats[match[1].toLowerCase()] = Number(match[2])
+  }
+
+  const capacityBytes = Number.isFinite(stats.capacity) && stats.capacity > 0 ? stats.capacity : null
+  const actualSizeBytes =
+    Number.isFinite(stats.allocation) && stats.allocation >= 0
+      ? stats.allocation
+      : Number.isFinite(stats.physical) && stats.physical >= 0
+        ? stats.physical
+        : null
+
+  if (capacityBytes === null && actualSizeBytes === null) {
+    return null
+  }
+
+  return {
+    capacityBytes,
+    actualSizeBytes,
+  }
+}
+
+const getVmDiskBlockInfo = async (vmName, target) => {
   if (!target) return null
   const blkInfoResult = await runVirsh(['domblkinfo', vmName, target], {
     timeout: 15000,
   })
   if (!blkInfoResult.success) return null
-  const capacityLine = blkInfoResult.stdout
-    .split('\n')
-    .find((line) => line.toLowerCase().startsWith('capacity:'))
-  if (!capacityLine) return null
-  const capacity = Number(capacityLine.split(':')[1].trim())
-  return Number.isFinite(capacity) && capacity > 0 ? capacity : null
+  return parseDomblkinfo(blkInfoResult.stdout)
+}
+
+const getVmDiskCapacityBytes = async (vmName, target) => {
+  return (await getVmDiskBlockInfo(vmName, target))?.capacityBytes ?? null
 }
 
 const getImageSizeGiB = (bytes) => {
@@ -653,7 +999,7 @@ const getImageSizeGiB = (bytes) => {
 const getQemuImgInfo = async (targetPath) => {
   if (!targetPath) return null
 
-  const result = await runQemuImg(['info', '--output=json', targetPath], {
+  const result = await runQemuImg(['info', '-U', '--output=json', targetPath], {
     timeout: 15000,
   })
   if (!result.success) {
@@ -1504,6 +1850,8 @@ export const getVMDetails = async (vmName) => {
       cdrom: cdroms[0] || null,
       cdroms,
       bootOrder: getVmBootOrder(domain),
+      bootTarget: getVmBootTarget(domain),
+      bootDevices: getVmBootDevices(domain),
       editable,
     }
   } catch (error) {
@@ -1752,6 +2100,11 @@ export const deleteVMDisk = async (vmName, target, payload = {}) => {
     throw new HttpError(404, '未找到可删除的磁盘')
   }
 
+  const nextBootTarget = getVmBootTarget(domain)
+  if (nextBootTarget) {
+    setVmBootTarget(domain, nextBootTarget)
+  }
+
   await defineVmPersistentXml(vmName, buildVmDomainXml(domain), 'delete-disk')
 
   if (deleteFile && disk.source) {
@@ -1930,7 +2283,10 @@ export const deleteVMCdrom = async (vmName) => {
     throw new HttpError(404, '当前虚拟机未配置光驱')
   }
 
-  if (getVmBootOrder(domain) === 'cdrom_first') {
+  const nextBootTarget = getVmBootTarget(domain)
+  if (nextBootTarget) {
+    setVmBootTarget(domain, nextBootTarget)
+  } else if (getVmBootOrder(domain) === 'cdrom_first') {
     setVmBootOrder(domain, 'disk_first')
   }
 
@@ -1952,7 +2308,10 @@ export const deleteVMCdromByTarget = async (vmName, target) => {
     throw new HttpError(404, '未找到指定光驱')
   }
 
-  if (getVmBootOrder(domain) === 'cdrom_first' && getVmCdroms(domain).length === 0) {
+  const nextBootTarget = getVmBootTarget(domain)
+  if (nextBootTarget) {
+    setVmBootTarget(domain, nextBootTarget)
+  } else if (getVmBootOrder(domain) === 'cdrom_first' && getVmCdroms(domain).length === 0) {
     setVmBootOrder(domain, 'disk_first')
   }
 
@@ -1963,6 +2322,18 @@ export const deleteVMCdromByTarget = async (vmName, target) => {
 export const updateVMBootOrder = async (vmName, payload) => {
   const { info, domain } = await getVmDomainState(vmName)
   ensureVmStoppedForConfig(info)
+
+  const target = typeof payload?.target === 'string' ? payload.target.trim() : ''
+  if (target) {
+    const bootDevices = getVmBootDevices(domain)
+    if (!bootDevices.some((item) => item.target === target)) {
+      throw new HttpError(400, '未找到可引导的设备')
+    }
+
+    setVmBootTarget(domain, target)
+    await defineVmPersistentXml(vmName, buildVmDomainXml(domain), 'boot-order')
+    return { message: '引导顺序已更新' }
+  }
 
   const mode = payload?.mode === 'cdrom_first' ? 'cdrom_first' : payload?.mode === 'disk_first' ? 'disk_first' : ''
   if (!mode) {
@@ -2148,24 +2519,21 @@ export const getVMMonitoring = async (vmName) => {
         networkTx: 0,
         diskRead: 0,
         diskWrite: 0,
+        memorySource: 'configured',
       }
     }
 
-    const stats = {}
-    const lines = stdout.split('\n')
-    for (const line of lines) {
-      if (!line.includes('=')) continue
-      const [key, value] = line.split('=').map((item) => item.trim())
-      stats[key] = value
-    }
+    const stats = parseVirshStats(stdout)
+    const guestMemory = await getGuestAgentMemoryUsage(vmName)
 
     return {
       cpuUsage: parseFloat(stats['cpu.time']) || 0,
-      memoryUsage: parseInt(stats['balloon.current']) || 0,
+      memoryUsage: guestMemory.usedKiB,
       networkRx: parseInt(stats['net.0.rx.bytes']) || 0,
       networkTx: parseInt(stats['net.0.tx.bytes']) || 0,
       diskRead: parseInt(stats['block.0.rd.bytes']) || 0,
       diskWrite: parseInt(stats['block.0.wr.bytes']) || 0,
+      memorySource: guestMemory.source,
     }
   } catch (error) {
     console.error('获取虚拟机监控数据错误:', error)
@@ -2176,6 +2544,7 @@ export const getVMMonitoring = async (vmName) => {
       networkTx: 0,
       diskRead: 0,
       diskWrite: 0,
+      memorySource: 'configured',
     }
   }
 }
