@@ -68,6 +68,7 @@ export interface VMDetails {
     source: string
     type: string
     model?: string
+    ips?: string[]
     mode?: 'bridge' | 'network' | 'unknown' | string
     editable?: boolean
   }>

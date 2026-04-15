@@ -236,6 +236,39 @@ const readGuestFile = async (vmName, path, maxBytes = 64 * 1024) => {
   }
 }
 
+const getGuestAgentInterfaceIpMap = async (vmName) => {
+  try {
+    const response = await runGuestAgentCommand(
+      vmName,
+      {
+        execute: 'guest-network-get-interfaces',
+      },
+      5
+    )
+
+    const interfaces = Array.isArray(response?.return) ? response.return : []
+    const ipMap = new Map()
+
+    for (const iface of interfaces) {
+      const mac = String(iface?.['hardware-address'] || '').trim().toLowerCase()
+      if (!mac) continue
+
+      const ips = Array.isArray(iface?.['ip-addresses'])
+        ? iface['ip-addresses']
+            .filter((item) => String(item?.['ip-address-type'] || '').trim().toLowerCase() === 'ipv4')
+            .map((item) => String(item?.['ip-address'] || '').trim())
+            .filter(Boolean)
+        : []
+
+      ipMap.set(mac, [...new Set(ips)])
+    }
+
+    return ipMap
+  } catch {
+    return new Map()
+  }
+}
+
 const getCachedGuestOsFamily = async (vmName) => {
   if (VM_GUEST_OS_CACHE.has(vmName)) {
     return VM_GUEST_OS_CACHE.get(vmName)
@@ -1816,6 +1849,7 @@ export const getVMDetails = async (vmName) => {
       }
     })
     const networkInterfaces = getVmNetworkSummaries(domain)
+    const guestInterfaceIpMap = status === 'running' ? await getGuestAgentInterfaceIpMap(vmName) : new Map()
     const storageBytes = disks.reduce((total, disk) => total + (disk.capacityBytes || 0), 0)
     const cpuTopology = getVmCpuTopology(domain, vcpu)
     const memoryMiB = getVmMemoryMiBFromDomain(domain, maxMemKiB)
@@ -1854,7 +1888,10 @@ export const getVMDetails = async (vmName) => {
       cpuTopology,
       storage: storageBytes ? formatBytes(storageBytes) : disks.length > 0 ? '已配置' : '未配置',
       storageBytes,
-      networkInterfaces,
+      networkInterfaces: networkInterfaces.map((iface) => ({
+        ...iface,
+        ips: guestInterfaceIpMap.get(String(iface.mac || '').toLowerCase()) || [],
+      })),
       disks,
       cdrom: cdroms[0] || null,
       cdroms,

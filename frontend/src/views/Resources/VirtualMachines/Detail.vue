@@ -427,6 +427,7 @@
                     <th class="px-4 py-3 font-medium">型号类型</th>
                     <th class="px-4 py-3 font-medium">MAC 地址</th>
                     <th class="px-4 py-3 font-medium">源</th>
+                    <th class="px-4 py-3 font-medium">IP 地址</th>
                     <th class="px-4 py-3 font-medium">状态</th>
                     <th class="px-4 py-3 font-medium text-right">操作</th>
                   </tr>
@@ -437,6 +438,11 @@
                     <td class="px-4 py-3 text-gray-600 dark:text-gray-400">{{ iface.model || iface.type || 'virtio' }}</td>
                     <td class="px-4 py-3 font-mono text-xs text-gray-600 dark:text-gray-400">{{ iface.mac || '-' }}</td>
                     <td class="px-4 py-3 text-gray-600 dark:text-gray-400">{{ iface.source || '-' }}</td>
+                    <td class="px-4 py-3 text-gray-600 dark:text-gray-400">
+                      <div v-if="iface.ips?.length" class="space-y-1">
+                        <div v-for="ip in iface.ips" :key="(iface.mac || iface.name || 'nic') + '-' + ip">{{ ip }}</div>
+                      </div>
+                    </td>
                     <td class="px-4 py-3 text-gray-600 dark:text-gray-400">{{ networkStateLabel() }}</td>
                     <td class="px-4 py-3">
                       <div class="flex justify-end gap-2">
@@ -460,7 +466,7 @@
                   </tr>
 
                   <tr v-if="vm.networkInterfaces.length === 0">
-                    <td colspan="6" class="px-4 py-8 text-center text-sm text-gray-600 dark:text-gray-400">暂无网络接口</td>
+                    <td colspan="7" class="px-4 py-8 text-center text-sm text-gray-600 dark:text-gray-400">暂无网络接口</td>
                   </tr>
                 </tbody>
               </table>
