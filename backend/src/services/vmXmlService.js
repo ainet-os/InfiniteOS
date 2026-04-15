@@ -146,6 +146,12 @@ const normalizeDiskBus = (bus) => (bus === 'sata' || bus === 'scsi' ? bus : 'vir
 
 const normalizeCdromBus = (bus) => (bus === 'scsi' ? 'scsi' : 'sata')
 
+const normalizeNetworkModel = (model) => {
+  const value = String(model || '').trim().toLowerCase()
+  if (value === 'e1000' || value === 'rtl8139') return value
+  return 'virtio'
+}
+
 const getDiskPrefix = (bus) => (bus === 'sata' || bus === 'scsi' ? 'sd' : 'vd')
 
 const formatDeviceSuffix = (index) => {
@@ -678,7 +684,7 @@ export const removeVmDisk = (domain, target) => {
   return true
 }
 
-export const buildVmBridgeInterface = ({ source, mac }) => {
+export const buildVmBridgeInterface = ({ source, mac, model }) => {
   return {
     '@_type': 'bridge',
     mac: {
@@ -688,7 +694,7 @@ export const buildVmBridgeInterface = ({ source, mac }) => {
       '@_bridge': source,
     },
     model: {
-      '@_type': 'virtio',
+      '@_type': normalizeNetworkModel(model),
     },
   }
 }
@@ -699,7 +705,7 @@ export const addVmBridgeInterface = (domain, payload) => {
   setVmDomainInterfaces(domain, interfaces)
 }
 
-export const updateVmBridgeInterface = (domain, mac, source) => {
+export const updateVmBridgeInterface = (domain, mac, source, model) => {
   const interfaces = getVmDomainInterfaces(domain)
   const index = interfaces.findIndex(
     (iface) => String(iface?.mac?.['@_address'] || '').toLowerCase() === String(mac || '').toLowerCase()
@@ -713,7 +719,7 @@ export const updateVmBridgeInterface = (domain, mac, source) => {
       '@_bridge': source,
     },
     model: {
-      '@_type': interfaces[index]?.model?.['@_type'] || 'virtio',
+      '@_type': normalizeNetworkModel(model || interfaces[index]?.model?.['@_type']),
     },
   }
   setVmDomainInterfaces(domain, interfaces)

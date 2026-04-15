@@ -94,7 +94,7 @@
                 控制台
               </button>
               <button
-                @click="deleteVM"
+                @click="openDeleteVMDialog"
                 class="rounded-lg bg-error-600 px-3.5 py-2 text-sm text-white hover:bg-error-700 dark:bg-error-500 dark:hover:bg-error-600"
               >
                 删除
@@ -279,7 +279,7 @@
             <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">磁盘</h2>
-                <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">系统盘、数据盘和安装介质</p>
+                <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">磁盘和光驱设备</p>
               </div>
               <button
                 :disabled="!canEditConfig"
@@ -309,7 +309,7 @@
                   <tr v-for="cdrom in cdromDevices" :key="`cdrom-${cdrom.target}`">
                     <td class="px-4 py-3 font-medium text-gray-800 dark:text-white/90">
                       <div class="flex flex-wrap items-center gap-2">
-                        <span>{{ cdrom.target || 'cdrom' }}</span>
+                        <span>{{ cdrom.target || '光驱' }}</span>
                         <span class="inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600 dark:bg-white/5 dark:text-gray-400">
                           光驱
                         </span>
@@ -317,7 +317,7 @@
                           v-if="isBootTarget(cdrom.target)"
                           class="inline-flex rounded-full bg-brand-500/10 px-2 py-0.5 text-xs text-brand-600 dark:text-brand-300"
                         >
-                          首启
+                          启动盘
                         </span>
                       </div>
                     </td>
@@ -352,55 +352,7 @@
                     </td>
                   </tr>
 
-                  <template v-if="systemDisk">
-                    <tr>
-                      <td class="px-4 py-3 font-medium text-gray-800 dark:text-white/90">
-                        <div class="flex flex-wrap items-center gap-2">
-                          <span>{{ systemDisk.target }}</span>
-                          <span class="inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600 dark:bg-white/5 dark:text-gray-400">
-                            {{ diskRoleLabel(systemDisk.role) }}
-                          </span>
-                          <span
-                            v-if="isBootTarget(systemDisk.target)"
-                            class="inline-flex rounded-full bg-brand-500/10 px-2 py-0.5 text-xs text-brand-600 dark:text-brand-300"
-                          >
-                            首启
-                          </span>
-                        </div>
-                      </td>
-                      <td class="px-4 py-3 text-gray-600 dark:text-gray-400">
-                        {{ formatStorageBytes(systemDisk.actualSizeBytes) }}
-                      </td>
-                      <td class="px-4 py-3 text-gray-600 dark:text-gray-400">
-                        {{ formatStorageBytes(systemDisk.capacityBytes) }}
-                      </td>
-                      <td class="px-4 py-3 text-gray-600 dark:text-gray-400">{{ systemDisk.bus }}</td>
-                      <td class="px-4 py-3 text-gray-600 dark:text-gray-400">{{ storageAccessLabel(systemDisk.readonly) }}</td>
-                      <td class="px-4 py-3 text-gray-600 dark:text-gray-400">{{ storageSourceLabel(systemDisk.sourceType) }}</td>
-                      <td class="px-4 py-3 font-mono text-sm text-gray-600 dark:text-gray-400">{{ systemDisk.source || '-' }}</td>
-                      <td class="px-4 py-3 text-gray-600 dark:text-gray-400">{{ systemDisk.format || '-' }}</td>
-                      <td class="px-4 py-3">
-                        <div class="flex justify-end gap-2">
-                          <button
-                            :disabled="!canEditConfig"
-                            @click="openDiskEditor(systemDisk.target)"
-                            class="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:border-brand-500 hover:text-brand-600 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:text-gray-300"
-                          >
-                            编辑
-                          </button>
-                          <button
-                            :disabled="!canEditConfig"
-                            @click="openDiskDeleteDialog(systemDisk.target)"
-                            class="rounded-lg border border-error-300 px-3 py-1.5 text-sm text-error-600 hover:bg-error-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-error-500/40 dark:text-error-300 dark:hover:bg-error-500/10"
-                          >
-                            删除
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  </template>
-
-                  <tr v-for="disk in dataDisks" :key="disk.target">
+                  <tr v-for="disk in diskDevices" :key="disk.target">
                     <td class="px-4 py-3 font-medium text-gray-800 dark:text-white/90">
                       <div class="flex flex-wrap items-center gap-2">
                         <span>{{ disk.target }}</span>
@@ -411,7 +363,7 @@
                           v-if="isBootTarget(disk.target)"
                           class="inline-flex rounded-full bg-brand-500/10 px-2 py-0.5 text-xs text-brand-600 dark:text-brand-300"
                         >
-                          首启
+                          启动盘
                         </span>
                       </div>
                     </td>
@@ -442,7 +394,7 @@
                     </td>
                   </tr>
 
-                  <tr v-if="cdromDevices.length === 0 && !systemDisk && dataDisks.length === 0">
+                  <tr v-if="cdromDevices.length === 0 && diskDevices.length === 0">
                     <td colspan="9" class="px-4 py-8 text-center text-sm text-gray-600 dark:text-gray-400">暂无磁盘设备</td>
                   </tr>
                 </tbody>
@@ -480,67 +432,32 @@
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-gray-200 dark:divide-gray-800">
-                  <template v-for="iface in vm.networkInterfaces" :key="iface.mac || iface.name">
-                    <tr>
-                      <td class="px-4 py-3 text-gray-800 dark:text-white/90">{{ interfaceModeLabel(iface.mode) }}</td>
-                      <td class="px-4 py-3 text-gray-600 dark:text-gray-400">{{ iface.model || iface.type || 'virtio' }}</td>
-                      <td class="px-4 py-3 font-mono text-xs text-gray-600 dark:text-gray-400">{{ iface.mac || '-' }}</td>
-                      <td class="px-4 py-3 text-gray-600 dark:text-gray-400">{{ iface.source || '-' }}</td>
-                      <td class="px-4 py-3 text-gray-600 dark:text-gray-400">{{ networkStateLabel() }}</td>
-                      <td class="px-4 py-3">
-                        <div class="flex justify-end gap-2">
-                          <button
-                            v-if="iface.mode === 'bridge' && iface.mac"
-                            :disabled="!canEditConfig"
-                            @click="openNetworkEditor(iface.mac)"
-                            class="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:border-brand-500 hover:text-brand-600 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:text-gray-300"
-                          >
-                            编辑
-                          </button>
-                          <button
-                            v-if="canEditConfig && iface.mac"
-                            @click="removeNetworkInterface(iface.mac)"
-                            class="rounded-lg border border-error-300 px-3 py-1.5 text-sm text-error-600 hover:bg-error-50 dark:border-error-500/40 dark:text-error-300 dark:hover:bg-error-500/10"
-                          >
-                            删除
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-
-                    <tr v-if="iface.mode === 'bridge' && iface.mac && networkEditingMac === iface.mac">
-                      <td colspan="6" class="px-4 py-4">
-                        <div class="flex flex-col gap-3 rounded-lg border border-gray-200 bg-gray-50/80 p-4 sm:flex-row sm:items-center sm:justify-between dark:border-gray-700 dark:bg-white/[0.02]">
-                          <div class="flex flex-wrap items-center gap-2">
-                            <label class="text-sm text-gray-600 dark:text-gray-400">桥接网卡</label>
-                            <select
-                              v-model="networkDrafts[iface.mac]"
-                              class="w-40 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-gray-600 dark:bg-gray-700 dark:text-white/90"
-                            >
-                              <option v-for="item in bridgeInterfaces" :key="item.name" :value="item.name">
-                                {{ item.name }}
-                              </option>
-                            </select>
-                          </div>
-                          <div class="flex justify-end gap-2">
-                            <button
-                              @click="cancelNetworkEditor"
-                              class="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 dark:border-gray-700 dark:text-gray-300"
-                            >
-                              取消
-                            </button>
-                            <button
-                              @click="saveNetworkInterface(iface.mac)"
-                              :disabled="networkSavingMac === iface.mac"
-                              class="rounded-lg bg-brand-500 px-3 py-2 text-sm text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                              保存
-                            </button>
-                          </div>
-                        </div>
-                      </td>
-                    </tr>
-                  </template>
+                  <tr v-for="iface in vm.networkInterfaces" :key="iface.mac || iface.name">
+                    <td class="px-4 py-3 text-gray-800 dark:text-white/90">{{ interfaceModeLabel(iface.mode) }}</td>
+                    <td class="px-4 py-3 text-gray-600 dark:text-gray-400">{{ iface.model || iface.type || 'virtio' }}</td>
+                    <td class="px-4 py-3 font-mono text-xs text-gray-600 dark:text-gray-400">{{ iface.mac || '-' }}</td>
+                    <td class="px-4 py-3 text-gray-600 dark:text-gray-400">{{ iface.source || '-' }}</td>
+                    <td class="px-4 py-3 text-gray-600 dark:text-gray-400">{{ networkStateLabel() }}</td>
+                    <td class="px-4 py-3">
+                      <div class="flex justify-end gap-2">
+                        <button
+                          v-if="iface.mode === 'bridge' && iface.mac"
+                          :disabled="!canEditConfig"
+                          @click="openNetworkEditor(iface.mac)"
+                          class="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:border-brand-500 hover:text-brand-600 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:text-gray-300"
+                        >
+                          编辑
+                        </button>
+                        <button
+                          v-if="canEditConfig && iface.mac"
+                          @click="removeNetworkInterface(iface.mac)"
+                          class="rounded-lg border border-error-300 px-3 py-1.5 text-sm text-error-600 hover:bg-error-50 dark:border-error-500/40 dark:text-error-300 dark:hover:bg-error-500/10"
+                        >
+                          删除
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
 
                   <tr v-if="vm.networkInterfaces.length === 0">
                     <td colspan="6" class="px-4 py-8 text-center text-sm text-gray-600 dark:text-gray-400">暂无网络接口</td>
@@ -815,6 +732,57 @@
     </Modal>
 
     <Modal
+      :is-open="deleteVmDialogOpen"
+      class-name="mx-4 max-w-md overflow-hidden"
+      overlay-class-name="bg-black/45"
+      @close="cancelDeleteVMDialog"
+    >
+      <div class="border-b border-gray-200 px-5 py-4 dark:border-gray-800">
+        <h3 class="text-lg font-semibold text-gray-800 dark:text-white/90">删除虚拟机</h3>
+        <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">
+          确定删除虚拟机 {{ vmName }} 吗？
+        </p>
+      </div>
+
+      <div class="px-5 py-5 text-sm text-gray-600 dark:text-gray-400">
+        <p>默认只会删除虚拟机定义，不会删除磁盘文件。</p>
+        <label
+          v-if="vmDeletableDiskFilesCount > 0"
+          class="mt-4 flex items-center gap-3 text-sm text-gray-700 dark:text-gray-300"
+        >
+          <input
+            v-model="deleteVmRemoveFiles"
+            type="checkbox"
+            class="h-4 w-4 rounded border-gray-300 text-error-600 focus:ring-error-500 dark:border-gray-600 dark:bg-gray-700"
+          />
+          <span>同时删除磁盘文件（{{ vmDeletableDiskFilesCount }} 个）</span>
+        </label>
+        <p v-else class="mt-4 text-xs text-gray-500 dark:text-gray-400">
+          当前虚机没有可直接删除的文件型磁盘，光驱 ISO 文件不会删除。
+        </p>
+        <p v-if="vmDeletableDiskFilesCount > 0" class="mt-3 text-xs text-gray-500 dark:text-gray-400">
+          仅会删除磁盘设备对应的文件，不会删除光驱 ISO 文件。
+        </p>
+      </div>
+
+      <div class="flex justify-end gap-2 border-t border-gray-200 px-5 py-4 dark:border-gray-800">
+        <button
+          @click="cancelDeleteVMDialog"
+          class="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 dark:border-gray-700 dark:text-gray-300"
+        >
+          取消
+        </button>
+        <button
+          @click="confirmDeleteVM"
+          :disabled="deleteVmSaving"
+          class="rounded-lg bg-error-600 px-3 py-2 text-sm text-white hover:bg-error-700 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-error-500 dark:hover:bg-error-600"
+        >
+          删除
+        </button>
+      </div>
+    </Modal>
+
+    <Modal
       :is-open="newDiskOpen"
       class-name="mx-4 max-w-2xl overflow-hidden"
       overlay-class-name="bg-black/45"
@@ -834,7 +802,7 @@
             class="w-36 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-gray-600 dark:bg-gray-700 dark:text-white/90"
           >
             <option value="disk">磁盘镜像</option>
-            <option value="cdrom">CDROM</option>
+            <option value="cdrom">光驱</option>
           </select>
         </div>
 
@@ -917,6 +885,70 @@
     </Modal>
 
     <Modal
+      :is-open="Boolean(networkEditingMac)"
+      class-name="mx-4 max-w-lg overflow-hidden"
+      overlay-class-name="bg-black/45"
+      @close="cancelNetworkEditor"
+    >
+      <div class="border-b border-gray-200 px-5 py-4 dark:border-gray-800">
+        <h3 class="text-lg font-semibold text-gray-800 dark:text-white/90">编辑网络接口</h3>
+        <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">
+          {{ editingNetworkInterface ? `修改网卡 ${editingNetworkInterface.mac} 的桥接网络` : '修改桥接网卡配置' }}
+        </p>
+      </div>
+
+      <div class="space-y-4 px-5 py-5">
+        <div>
+          <label class="mb-2 block text-sm text-gray-600 dark:text-gray-400">MAC 地址</label>
+          <div class="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 font-mono text-sm text-gray-700 dark:border-gray-700 dark:bg-white/[0.02] dark:text-gray-300">
+            {{ editingNetworkInterface?.mac || '-' }}
+          </div>
+        </div>
+
+        <div>
+          <label class="mb-2 block text-sm text-gray-600 dark:text-gray-400">桥接网卡</label>
+          <select
+            v-model="networkEditSource"
+            class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-gray-600 dark:bg-gray-700 dark:text-white/90"
+          >
+            <option value="" disabled>选择桥接网卡</option>
+            <option v-for="item in bridgeInterfaces" :key="item.name" :value="item.name">
+              {{ item.name }}
+            </option>
+          </select>
+        </div>
+
+        <div>
+          <label class="mb-2 block text-sm text-gray-600 dark:text-gray-400">设备型号</label>
+          <select
+            v-model="networkEditModel"
+            class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-gray-600 dark:bg-gray-700 dark:text-white/90"
+          >
+            <option v-for="item in networkModelOptions" :key="item" :value="item">
+              {{ item }}
+            </option>
+          </select>
+        </div>
+      </div>
+
+      <div class="flex justify-end gap-2 border-t border-gray-200 px-5 py-4 dark:border-gray-800">
+        <button
+          @click="cancelNetworkEditor"
+          class="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 dark:border-gray-700 dark:text-gray-300"
+        >
+          取消
+        </button>
+        <button
+          @click="saveNetworkInterface(networkEditingMac)"
+          :disabled="!networkEditSource || networkSavingMac === networkEditingMac"
+          class="rounded-lg bg-brand-500 px-3 py-2 text-sm text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          保存
+        </button>
+      </div>
+    </Modal>
+
+    <Modal
       :is-open="newNetworkOpen"
       class-name="mx-4 max-w-lg overflow-hidden"
       overlay-class-name="bg-black/45"
@@ -924,20 +956,34 @@
     >
       <div class="border-b border-gray-200 px-5 py-4 dark:border-gray-800">
         <h3 class="text-lg font-semibold text-gray-800 dark:text-white/90">添加网络接口</h3>
-        <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">新增一块桥接网卡，默认使用 virtio 模型</p>
+        <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">新增一块桥接网卡，并选择设备型号</p>
       </div>
 
-      <div class="px-5 py-5">
-        <label class="mb-2 block text-sm text-gray-600 dark:text-gray-400">桥接网卡</label>
-        <select
-          v-model="newNetworkSource"
-          class="w-40 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-gray-600 dark:bg-gray-700 dark:text-white/90"
-        >
-          <option value="" disabled>选择桥接网卡</option>
-          <option v-for="item in bridgeInterfaces" :key="item.name" :value="item.name">
-            {{ item.name }}
-          </option>
-        </select>
+      <div class="space-y-4 px-5 py-5">
+        <div>
+          <label class="mb-2 block text-sm text-gray-600 dark:text-gray-400">桥接网卡</label>
+          <select
+            v-model="newNetworkSource"
+            class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-gray-600 dark:bg-gray-700 dark:text-white/90"
+          >
+            <option value="" disabled>选择桥接网卡</option>
+            <option v-for="item in bridgeInterfaces" :key="item.name" :value="item.name">
+              {{ item.name }}
+            </option>
+          </select>
+        </div>
+
+        <div>
+          <label class="mb-2 block text-sm text-gray-600 dark:text-gray-400">设备型号</label>
+          <select
+            v-model="newNetworkModel"
+            class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-gray-600 dark:bg-gray-700 dark:text-white/90"
+          >
+            <option v-for="item in networkModelOptions" :key="item" :value="item">
+              {{ item }}
+            </option>
+          </select>
+        </div>
       </div>
 
       <div class="flex justify-end gap-2 border-t border-gray-200 px-5 py-4 dark:border-gray-800">
@@ -1078,11 +1124,15 @@ const router = useRouter()
 
 const vmName = ref(route.params.name as string)
 
+type NetworkModel = 'virtio' | 'e1000' | 'rtl8139'
+
 type VMDetailViewModel = VMDetails & {
   cpuUsage?: number
   memoryUsage?: number
   networkUsage?: number
 }
+
+const networkModelOptions: NetworkModel[] = ['virtio', 'e1000', 'rtl8139']
 
 const loading = ref(true)
 const loadError = ref('')
@@ -1132,6 +1182,8 @@ const memoryEditing = ref(false)
 const diskEditingTarget = ref('')
 const diskDeleteTarget = ref('')
 const diskDeleteRemoveFile = ref(false)
+const deleteVmDialogOpen = ref(false)
+const deleteVmRemoveFiles = ref(false)
 const activeCdromTarget = ref('')
 const cdromInsertDialogOpen = ref(false)
 const cdromEjectDialogOpen = ref(false)
@@ -1145,6 +1197,7 @@ const cpuSaving = ref(false)
 const memorySaving = ref(false)
 const diskSaving = ref(false)
 const diskDeleteSaving = ref(false)
+const deleteVmSaving = ref(false)
 const bootSaving = ref(false)
 const cdromSaving = ref(false)
 const newDiskSaving = ref(false)
@@ -1186,7 +1239,9 @@ const newDiskForm = ref<{
 
 const bootTargetForm = ref('')
 const newNetworkSource = ref('')
+const newNetworkModel = ref<NetworkModel>('virtio')
 const networkDrafts = ref<Record<string, string>>({})
+const networkModelDrafts = ref<Record<string, NetworkModel>>({})
 
 let monitorTimer: number | null = null
 let prevCpuTimeNs: number | null = null
@@ -1316,6 +1371,11 @@ const normalizeDiskBusValue = (bus?: string): 'virtio' | 'sata' | 'scsi' => {
   return 'virtio'
 }
 
+const normalizeNetworkModelValue = (model?: string): NetworkModel => {
+  if (model === 'e1000' || model === 'rtl8139') return model
+  return 'virtio'
+}
+
 const canEditConfig = computed(() => {
   return Boolean(vm.value.editable?.cpuMemory)
 })
@@ -1354,8 +1414,8 @@ const cdromDevices = computed(() => {
   return vm.value.cdrom ? [vm.value.cdrom] : []
 })
 
-const dataDisks = computed(() => {
-  return vm.value.disks.filter((disk) => disk.role === 'data')
+const diskDevices = computed(() => {
+  return vm.value.disks
 })
 
 const editingDisk = computed(() => {
@@ -1366,20 +1426,26 @@ const deletingDisk = computed(() => {
   return vm.value.disks.find((disk) => disk.target === diskDeleteTarget.value) || null
 })
 
+const vmDeletableDiskFilesCount = computed(() => {
+  return diskDevices.value.filter((disk) => disk.sourceType === 'file' && disk.source).length
+})
+
 const activeCdrom = computed(() => {
   return cdromDevices.value.find((cdrom) => cdrom.target === activeCdromTarget.value) || null
 })
 
+const editingNetworkInterface = computed(() => {
+  return vm.value.networkInterfaces.find((iface) => iface.mac === networkEditingMac.value) || null
+})
+
 const diskRoleLabel = (role?: string) => {
-  if (role === 'system') return '系统盘'
-  if (role === 'data') return '数据盘'
   return '磁盘'
 }
 
 const getBootDeviceLabel = (target: string, device?: 'disk' | 'cdrom') => {
   const disk = vm.value.disks.find((item) => item.target === target)
   if (disk) {
-    return `${target} (${diskRoleLabel(disk.role)})`
+    return `${target} (磁盘)`
   }
 
   const cdrom = cdromDevices.value.find((item) => item.target === target)
@@ -1393,7 +1459,7 @@ const getBootDeviceLabel = (target: string, device?: 'disk' | 'cdrom') => {
 const getBootDeviceHint = (target: string, device?: 'disk' | 'cdrom') => {
   const disk = vm.value.disks.find((item) => item.target === target)
   if (disk) {
-    return `${disk.bus || 'virtio'} / ${storageSourceLabel(disk.sourceType)}`
+    return disk.source || '-'
   }
 
   const cdrom = cdromDevices.value.find((item) => item.target === target)
@@ -1462,45 +1528,85 @@ const basicInfoItems = computed(() => [
   { label: '虚机 ID', value: vm.value.id || '-' },
   { label: 'UUID', value: vm.value.uuid || '-' },
   { label: '总存储', value: vm.value.storage || '-' },
-  { label: '网卡 / 数据盘', value: `${vm.value.networkInterfaces.length} / ${dataDisks.value.length}` },
+  { label: '网卡 / 磁盘', value: `${vm.value.networkInterfaces.length} / ${diskDevices.value.length}` },
 ])
 
 const memoryUsageWidth = computed(() => {
   if (memoryUsageSource.value !== 'guest_agent') {
-    return '0%'
+    if (vm.value.status === 'stopped') {
+      return '0%'
+    }
+    return totalMemoryKiB.value > 0 ? '100%' : '0%'
   }
   return `${Math.max(0, Math.min(100, Number(vm.value.memoryUsage) || 0))}%`
 })
 
 const cpuUsageWidth = computed(() => `${Math.max(0, Math.min(100, Number(vm.value.cpuUsage) || 0))}%`)
 
-const memoryUsageValueLabel = computed(() => {
-  if (memoryUsageSource.value === 'configured') {
-    return `已配置 ${memoryLabel.value}`
+const formatMemoryGiBValue = (valueKiB: number) => {
+  const gib = Math.max(0, Number(valueKiB) || 0) / 1024 / 1024
+  const label = gib >= 10 ? gib.toFixed(0) : gib.toFixed(1)
+  return label.replace(/\.0$/, '')
+}
+
+const totalMemoryKiB = computed(() => {
+  if (vm.value.memoryKiB && vm.value.memoryKiB > 0) {
+    return vm.value.memoryKiB
   }
-  if (memoryUsageSource.value !== 'guest_agent') {
-    return '未采集'
+  if (vm.value.memoryMiB && vm.value.memoryMiB > 0) {
+    return vm.value.memoryMiB * 1024
+  }
+  return parseKiB(vm.value.ram) || 0
+})
+
+const memoryUsageValueLabel = computed(() => {
+  const totalKiB = totalMemoryKiB.value
+  if (!totalKiB) {
+    if (memoryUsageSource.value === 'guest_agent') {
+      return `${vm.value.memoryUsage || 0}%`
+    }
+    return memoryLabel.value
   }
 
-  const totalKiB = vm.value.memoryKiB || 0
-  if (!totalKiB) {
-    return `${vm.value.memoryUsage || 0}%`
+  const usedKiB =
+    memoryUsageSource.value === 'guest_agent' ? memoryCurrentKiB.value : vm.value.status === 'stopped' ? 0 : totalKiB
+  return `${formatMemoryGiBValue(usedKiB)} / ${formatMemoryGiBValue(totalKiB)} GiB`
+})
+
+const networkEditSource = computed({
+  get: () => {
+    if (!networkEditingMac.value) return ''
+    return networkDrafts.value[networkEditingMac.value] || ''
+  },
+  set: (value: string) => {
+    if (!networkEditingMac.value) return
+    networkDrafts.value[networkEditingMac.value] = value
+  },
+})
+
+const networkEditModel = computed<NetworkModel>({
+  get: () => {
+    if (!networkEditingMac.value) return 'virtio'
+    return networkModelDrafts.value[networkEditingMac.value] || 'virtio'
+  },
+  set: (value) => {
+    if (!networkEditingMac.value) return
+    networkModelDrafts.value[networkEditingMac.value] = normalizeNetworkModelValue(value)
+  },
+})
+
+const memoryMonitorUsagePercent = computed(() => {
+  if (vm.value.status !== 'running') {
+    return 0
   }
-  const usedGiB = memoryCurrentKiB.value / 1024 / 1024
-  const totalGiB = totalKiB / 1024 / 1024
-  const usedLabel = usedGiB >= 10 ? usedGiB.toFixed(0) : usedGiB.toFixed(1)
-  const totalLabel = totalGiB >= 10 ? totalGiB.toFixed(0) : totalGiB.toFixed(1)
-  return `${usedLabel} / ${totalLabel} GiB`
+  if (memoryUsageSource.value !== 'guest_agent') {
+    return totalMemoryKiB.value > 0 ? 100 : 0
+  }
+  return Math.max(0, Math.min(100, Number(vm.value.memoryUsage) || 0))
 })
 
 const memoryMonitorValueLabel = computed(() => {
-  if (memoryUsageSource.value === 'configured') {
-    return memoryLabel.value
-  }
-  if (memoryUsageSource.value !== 'guest_agent') {
-    return '-'
-  }
-  return `${vm.value.memoryUsage || 0}%`
+  return `${memoryMonitorUsagePercent.value}%`
 })
 
 const cpuUsageValueLabel = computed(() => {
@@ -1623,10 +1729,16 @@ const syncFormsFromVm = () => {
 
   bootTargetForm.value = vm.value.bootTarget || bootDevices.value[0]?.target || ''
   newNetworkSource.value = bridgeInterfaces.value[0]?.name || ''
+  newNetworkModel.value = 'virtio'
   networkDrafts.value = Object.fromEntries(
     vm.value.networkInterfaces
       .filter((iface) => iface.mac)
       .map((iface) => [iface.mac, iface.source || bridgeInterfaces.value[0]?.name || ''])
+  )
+  networkModelDrafts.value = Object.fromEntries(
+    vm.value.networkInterfaces
+      .filter((iface) => iface.mac)
+      .map((iface) => [iface.mac, normalizeNetworkModelValue(iface.model || iface.type)])
   )
 }
 
@@ -1743,7 +1855,7 @@ const refreshMonitoring = async () => {
 
     pushLabel()
     pushPoint(cpuSeriesData.value, Number(vm.value.cpuUsage) || 0)
-    pushPoint(memorySeriesData.value, Number(vm.value.memoryUsage) || 0)
+    pushPoint(memorySeriesData.value, memoryMonitorUsagePercent.value)
     pushPoint(networkSeriesData.value, Number(vm.value.networkUsage) || 0)
   } catch (error) {
     console.warn('获取虚机监控失败:', error)
@@ -1984,7 +2096,7 @@ const submitNewDevice = async () => {
     cancelNewDisk()
     await refreshDetails()
   } catch (error: any) {
-    alert(error?.error || (newDiskForm.value.device === 'cdrom' ? '添加 CDROM 失败' : '添加数据磁盘失败'))
+    alert(error?.error || (newDiskForm.value.device === 'cdrom' ? '添加光驱失败' : '添加数据磁盘失败'))
   } finally {
     newDiskSaving.value = false
   }
@@ -2020,12 +2132,14 @@ const confirmDiskDelete = async () => {
 
 const openNewNetworkDialog = () => {
   newNetworkSource.value = bridgeInterfaces.value[0]?.name || ''
+  newNetworkModel.value = 'virtio'
   newNetworkOpen.value = true
 }
 
 const cancelNewNetworkDialog = () => {
   newNetworkOpen.value = false
   newNetworkSource.value = bridgeInterfaces.value[0]?.name || ''
+  newNetworkModel.value = 'virtio'
 }
 
 const addNetworkInterface = async () => {
@@ -2033,6 +2147,7 @@ const addNetworkInterface = async () => {
   try {
     await virtualMachinesApi.addVMNetworkInterface(vmName.value, {
       source: newNetworkSource.value,
+      model: newNetworkModel.value,
     })
     cancelNewNetworkDialog()
     await refreshDetails()
@@ -2044,6 +2159,12 @@ const addNetworkInterface = async () => {
 }
 
 const openNetworkEditor = (mac: string) => {
+  const iface = vm.value.networkInterfaces.find((item) => item.mac === mac)
+  if (!iface) {
+    return
+  }
+  networkDrafts.value[mac] = iface.source || bridgeInterfaces.value[0]?.name || ''
+  networkModelDrafts.value[mac] = normalizeNetworkModelValue(iface.model || iface.type)
   networkEditingMac.value = mac
 }
 
@@ -2053,10 +2174,12 @@ const cancelNetworkEditor = () => {
 }
 
 const saveNetworkInterface = async (mac: string) => {
+  if (!mac) return
   networkSavingMac.value = mac
   try {
     await virtualMachinesApi.updateVMNetworkInterface(vmName.value, mac, {
       source: networkDrafts.value[mac] || '',
+      model: networkModelDrafts.value[mac] || 'virtio',
     })
     networkEditingMac.value = ''
     await refreshDetails()
@@ -2144,6 +2267,16 @@ const resumeVM = async () => {
   }
 }
 
+const openDeleteVMDialog = () => {
+  deleteVmRemoveFiles.value = false
+  deleteVmDialogOpen.value = true
+}
+
+const cancelDeleteVMDialog = () => {
+  deleteVmDialogOpen.value = false
+  deleteVmRemoveFiles.value = false
+}
+
 const openConsole = async () => {
   try {
     const info = await virtualMachinesApi.getVMConsole(vmName.value)
@@ -2154,16 +2287,21 @@ const openConsole = async () => {
   }
 }
 
-const deleteVM = async () => {
-  if (!confirm('确定要删除这个虚拟机吗？')) {
-    return
-  }
-
+const confirmDeleteVM = async () => {
+  deleteVmSaving.value = true
   try {
-    await virtualMachinesApi.deleteVM(vmName.value)
+    const result = await virtualMachinesApi.deleteVM(vmName.value, {
+      deleteFile: deleteVmRemoveFiles.value,
+    })
+    cancelDeleteVMDialog()
+    if (result?.message && result.message !== '虚拟机删除成功') {
+      alert(result.message)
+    }
     router.push('/virtual-machines')
   } catch (error: any) {
     alert(error?.error || '删除虚拟机失败')
+  } finally {
+    deleteVmSaving.value = false
   }
 }
 
@@ -2179,6 +2317,7 @@ const pollVmState = async () => {
     cdromInsertDialogOpen.value ||
     cdromEjectDialogOpen.value ||
     cdromDeleteDialogOpen.value ||
+    deleteVmDialogOpen.value ||
     newDiskOpen.value ||
     bootEditing.value ||
     newNetworkOpen.value ||

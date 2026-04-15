@@ -479,6 +479,15 @@ const normalizeCdromBus = (bus, fallback = 'sata') => {
   return String(fallback || '').trim().toLowerCase() === 'scsi' ? 'scsi' : 'sata'
 }
 
+const normalizeNetworkModel = (model, fallback = 'virtio') => {
+  const value = String(model || '').trim().toLowerCase()
+  if (value === 'virtio' || value === 'e1000' || value === 'rtl8139') return value
+
+  const fallbackValue = String(fallback || '').trim().toLowerCase()
+  if (fallbackValue === 'e1000' || fallbackValue === 'rtl8139') return fallbackValue
+  return 'virtio'
+}
+
 const roundGiBFromMiB = (memoryMiB) => {
   if (!Number.isFinite(memoryMiB) || memoryMiB <= 0) return 1
   return Math.max(1, Math.round(memoryMiB / 1024))
@@ -2125,6 +2134,7 @@ export const addVMNetworkInterface = async (vmName, payload) => {
   ensureVmStoppedForConfig(info)
 
   const source = typeof payload?.source === 'string' ? payload.source.trim() : ''
+  const model = normalizeNetworkModel(payload?.model)
   if (!source) {
     throw new HttpError(400, '请选择桥接网卡')
   }
@@ -2145,6 +2155,7 @@ export const addVMNetworkInterface = async (vmName, payload) => {
   addVmBridgeInterface(domain, {
     source,
     mac,
+    model,
   })
   await defineVmPersistentXml(vmName, buildVmDomainXml(domain), 'add-nic')
   return { message: '网卡添加成功', mac }
@@ -2155,6 +2166,10 @@ export const updateVMNetworkInterfaceConfig = async (vmName, mac, payload) => {
   ensureVmStoppedForConfig(info)
 
   const source = typeof payload?.source === 'string' ? payload.source.trim() : ''
+  const currentInterface = getVmNetworkSummaries(domain).find(
+    (item) => String(item.mac || '').toLowerCase() === String(mac || '').toLowerCase()
+  )
+  const model = normalizeNetworkModel(payload?.model, currentInterface?.model || currentInterface?.type || 'virtio')
   if (!source) {
     throw new HttpError(400, '请选择桥接网卡')
   }
@@ -2165,7 +2180,7 @@ export const updateVMNetworkInterfaceConfig = async (vmName, mac, payload) => {
     throw new HttpError(400, `桥接网卡 ${source} 不存在`)
   }
 
-  const updated = updateVmBridgeInterface(domain, mac, source)
+  const updated = updateVmBridgeInterface(domain, mac, source, model)
   if (!updated) {
     throw new HttpError(404, '未找到指定的网卡')
   }
@@ -2483,7 +2498,22 @@ export const resumeVM = async (vmName) => {
 /**
  * 删除虚拟机
  */
-export const deleteVM = async (vmName) => {
+export const deleteVM = async (vmName, payload = {}) => {
+  const deleteFile = Boolean(payload?.deleteFile)
+  let diskFiles = []
+
+  if (deleteFile) {
+    try {
+      const xml = await getVmXml(vmName)
+      const domain = parseVmDomainXml(xml)
+      diskFiles = getVmDiskSummaries(domain)
+        .filter((disk) => disk.sourceType === 'file' && disk.source)
+        .map((disk) => disk.source)
+    } catch (error) {
+      console.warn('获取虚机磁盘文件列表失败:', error)
+    }
+  }
+
   try {
     await runVirsh(['shutdown', vmName], { timeout: 15000 })
     await new Promise((resolve) => setTimeout(resolve, 2000))
@@ -2499,7 +2529,26 @@ export const deleteVM = async (vmName) => {
     }
   }
 
-  return { message: '虚拟机删除成功' }
+  if (!deleteFile || diskFiles.length === 0) {
+    return { message: '虚拟机删除成功' }
+  }
+
+  const uniqueDiskFiles = [...new Set(diskFiles)]
+  const failedFiles = []
+  for (const diskFile of uniqueDiskFiles) {
+    try {
+      await safeRemoveFile(diskFile)
+    } catch (error) {
+      console.error(`删除虚机磁盘文件失败: ${diskFile}`, error)
+      failedFiles.push(diskFile)
+    }
+  }
+
+  if (failedFiles.length > 0) {
+    return { message: '虚拟机已删除，但部分磁盘文件删除失败' }
+  }
+
+  return { message: '虚拟机删除成功，磁盘文件已删除' }
 }
 
 /**

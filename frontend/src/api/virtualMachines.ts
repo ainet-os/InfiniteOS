@@ -271,8 +271,13 @@ export interface DeleteVMDiskRequest {
   deleteFile?: boolean
 }
 
+export interface DeleteVMRequest {
+  deleteFile?: boolean
+}
+
 export interface AddVMNetworkRequest {
   source: string
+  model?: 'virtio' | 'e1000' | 'rtl8139' | string
 }
 
 export interface UpdateVMBootOrderRequest {
@@ -362,8 +367,10 @@ export const virtualMachinesApi = {
   resumeVM: (name: string): Promise<{ message: string }> => {
     return api.post(`/virtual-machines/${name}/resume`)
   },
-  deleteVM: (name: string): Promise<{ message: string }> => {
-    return api.delete(`/virtual-machines/${name}`)
+  deleteVM: (name: string, payload?: DeleteVMRequest): Promise<{ message: string }> => {
+    return api.delete(`/virtual-machines/${name}`, {
+      data: payload,
+    })
   },
   getVMMonitoring: (name: string): Promise<VMMonitoring> => {
     return api.get(`/virtual-machines/${name}/monitoring`)

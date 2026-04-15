@@ -512,7 +512,7 @@
                         {{ $t('common.console') }}
                       </button>
                       <button
-                        @click="deleteVM(vm.name)"
+                        @click="openDeleteVMDialog(vm.name)"
                         class="px-2 py-1 text-xs bg-error-600 dark:bg-error-500 text-white rounded hover:bg-error-700 dark:hover:bg-error-600 transition-colors whitespace-nowrap"
                         :title="$t('common.delete')"
                       >
@@ -527,6 +527,51 @@
         </div>
       </div>
     </div>
+
+    <Modal
+      :is-open="deleteVmDialogOpen"
+      class-name="mx-4 max-w-md overflow-hidden"
+      overlay-class-name="bg-black/45"
+      @close="cancelDeleteVMDialog"
+    >
+      <div class="border-b border-gray-200 px-5 py-4 dark:border-gray-800">
+        <h3 class="text-lg font-semibold text-gray-800 dark:text-white/90">删除虚拟机</h3>
+        <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">
+          {{ deleteTargetVmName ? `确定删除虚拟机 ${deleteTargetVmName} 吗？` : '确定删除当前虚拟机吗？' }}
+        </p>
+      </div>
+
+      <div class="px-5 py-5 text-sm text-gray-600 dark:text-gray-400">
+        <p>默认只会删除虚拟机定义，不会删除磁盘文件。</p>
+        <label class="mt-4 flex items-center gap-3 text-sm text-gray-700 dark:text-gray-300">
+          <input
+            v-model="deleteVmRemoveFiles"
+            type="checkbox"
+            class="h-4 w-4 rounded border-gray-300 text-error-600 focus:ring-error-500 dark:border-gray-600 dark:bg-gray-700"
+          />
+          <span>同时删除磁盘文件</span>
+        </label>
+        <p class="mt-3 text-xs text-gray-500 dark:text-gray-400">
+          仅会删除磁盘设备对应的文件，不会删除光驱 ISO 文件。
+        </p>
+      </div>
+
+      <div class="flex justify-end gap-2 border-t border-gray-200 px-5 py-4 dark:border-gray-800">
+        <button
+          @click="cancelDeleteVMDialog"
+          class="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 dark:border-gray-700 dark:text-gray-300"
+        >
+          取消
+        </button>
+        <button
+          @click="confirmDeleteVM"
+          :disabled="deleteVmSaving || !deleteTargetVmName"
+          class="rounded-lg bg-error-600 px-3 py-2 text-sm text-white hover:bg-error-700 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-error-500 dark:hover:bg-error-600"
+        >
+          删除
+        </button>
+      </div>
+    </Modal>
   </AdminLayout>
 </template>
 
@@ -534,6 +579,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AdminLayout from '@/components/layout/AdminLayout.vue'
+import Modal from '@/components/ui/Modal.vue'
 import {
   virtualMachinesApi,
   type CreateVMRequest,
@@ -617,6 +663,10 @@ const nextCreateFormItemId = (prefix: string) => {
 const loading = ref(false)
 const vms = ref<VirtualMachine[]>([])
 const showCreateDialog = ref(false)
+const deleteVmDialogOpen = ref(false)
+const deleteTargetVmName = ref('')
+const deleteVmRemoveFiles = ref(false)
+const deleteVmSaving = ref(false)
 const creating = ref(false)
 const capabilitiesLoading = ref(false)
 const capabilitiesError = ref('')
@@ -1164,16 +1214,37 @@ const restartVM = async (name: string) => {
   }
 }
 
-const deleteVM = async (name: string) => {
-  if (confirm(`${$t('common.confirmDeleteVM')} ${name} ${$t('common.questionMark')}`)) {
-    try {
-      await virtualMachinesApi.deleteVM(name)
+const openDeleteVMDialog = (name: string) => {
+  deleteTargetVmName.value = name
+  deleteVmRemoveFiles.value = false
+  deleteVmDialogOpen.value = true
+}
+
+const cancelDeleteVMDialog = () => {
+  deleteVmDialogOpen.value = false
+  deleteTargetVmName.value = ''
+  deleteVmRemoveFiles.value = false
+}
+
+const confirmDeleteVM = async () => {
+  if (!deleteTargetVmName.value) return
+  deleteVmSaving.value = true
+  try {
+    const result = await virtualMachinesApi.deleteVM(deleteTargetVmName.value, {
+      deleteFile: deleteVmRemoveFiles.value,
+    })
+    cancelDeleteVMDialog()
+    if (result?.message && result.message !== '虚拟机删除成功') {
+      alert(result.message)
+    } else {
       alert('虚拟机删除成功')
-      await refreshVMs()
-    } catch (error: any) {
-      console.error('删除虚拟机失败:', error)
-      alert(error?.error || '删除虚拟机失败')
     }
+    await refreshVMs()
+  } catch (error: any) {
+    console.error('删除虚拟机失败:', error)
+    alert(error?.error || '删除虚拟机失败')
+  } finally {
+    deleteVmSaving.value = false
   }
 }
 

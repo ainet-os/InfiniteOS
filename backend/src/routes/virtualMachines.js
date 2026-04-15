@@ -377,11 +377,11 @@ router.post('/:name/boot-order', async (req, res) => {
 router.delete('/:name', async (req, res) => {
   try {
     const vmName = req.params.name
-    await deleteVM(vmName)
-    res.json({ message: '虚拟机删除成功' })
+    const result = await deleteVM(vmName, req.body)
+    res.json(result)
   } catch (error) {
     console.error('删除虚拟机错误:', error)
-    res.status(500).json({ error: '删除虚拟机失败' })
+    res.status(error.status || 500).json({ error: error.message || '删除虚拟机失败' })
   }
 })
 
