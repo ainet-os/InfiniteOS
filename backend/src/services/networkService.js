@@ -5,11 +5,13 @@ import os from 'node:os'
 import path from 'node:path'
 import YAML from 'yaml'
 import si from 'systeminformation'
-import { execCommand, execSudo } from '../utils/exec.js'
+import { execSudo } from '../utils/exec.js'
 
 const NETPLAN_DIR = '/etc/netplan'
 const APP_NETPLAN_FILE = `${NETPLAN_DIR}/90-infiniteos.yaml`
 const CLOUD_INIT_DISABLE_FILE = '/etc/cloud/cloud.cfg.d/99-disable-network-config.cfg'
+const SYS_CLASS_NET_DIR = '/sys/class/net'
+const SYS_VIRTUAL_NET_DIR = '/sys/devices/virtual/net'
 const VALID_INTERFACE_NAME = /^[a-zA-Z0-9_.:@-]+$/
 const CONFIG_SECTIONS = {
   ethernet: 'ethernets',
@@ -33,38 +35,6 @@ const BOND_MODES = new Set([
   'balance-tlb',
   'balance-alb',
 ])
-const RUNTIME_LOGICAL_NAME_PATTERNS = [
-  /^lo$/,
-  /^bond\d+/,
-  /^br[\w.-]*/,
-  /^virbr\d*/,
-  /^docker\d*/,
-  /^br-[a-f0-9]+/,
-  /^veth/,
-  /^tun\d*/,
-  /^tap\d*/,
-  /^tailscale\d*/,
-  /^wg\d*/,
-  /^zt[a-z0-9]+/,
-  /^cni\d*/,
-  /^flannel\./,
-  /^cali/,
-  /^vxlan/,
-  /^dummy\d*/,
-  /^team\d*/,
-  /^macvtap/,
-  /^macvlan/,
-  /^ifb\d*/,
-  /^ppp\d*/,
-  /^vlan\d+/,
-  /^gre\d*/,
-  /^gretap\d*/,
-  /^erspan\d*/,
-  /^sit\d*/,
-  /^ip6tnl\d*/,
-  /^geneve\d*/,
-  /^[^.]+\.\d+$/,
-]
 
 function shellQuote(value) {
   return `'${String(value).replace(/'/g, `'\\''`)}'`
@@ -551,43 +521,151 @@ function hasNetplanDefinition(name, mergedConfig) {
   )
 }
 
-function getConfigType(name, mergedConfig, runtimeInterface) {
+function normalizeRuntimeLinkText(value) {
+  return typeof value === 'string' ? value.trim().toLowerCase() : ''
+}
+
+async function getRuntimeSysfsNetMap(interfaceNames = []) {
+  try {
+    const names = Array.isArray(interfaceNames) && interfaceNames.length > 0
+      ? interfaceNames
+      : await fs.readdir(SYS_CLASS_NET_DIR)
+
+    const entries = await Promise.all(names.map(async name => {
+      const interfaceName = typeof name === 'string' ? name.trim() : ''
+      if (!interfaceName) return null
+
+      const classPath = path.join(SYS_CLASS_NET_DIR, interfaceName)
+      try {
+        const resolvedPath = await fs.realpath(classPath)
+        const normalizedResolvedPath = resolvedPath.trim()
+        const virtualPath = path.join(SYS_VIRTUAL_NET_DIR, interfaceName)
+        const isVirtual = normalizedResolvedPath === virtualPath
+          || normalizedResolvedPath.startsWith(`${virtualPath}/`)
+
+        return [
+          interfaceName,
+          {
+            classPath,
+            resolvedPath: normalizedResolvedPath,
+            isVirtual,
+            isPhysical: !isVirtual,
+          },
+        ]
+      } catch {
+        return null
+      }
+    }))
+
+    return new Map(entries.filter(Boolean))
+  } catch (error) {
+    console.error('读取 sysfs 网卡信息失败:', error)
+    return new Map()
+  }
+}
+
+function getRuntimeInfoKind(runtimeLink) {
+  return normalizeRuntimeLinkText(runtimeLink?.infoKind)
+}
+
+function isRuntimeBridgeLike(runtimeLink) {
+  return getRuntimeInfoKind(runtimeLink) === 'bridge'
+}
+
+function isRuntimeBondLike(runtimeLink) {
+  return getRuntimeInfoKind(runtimeLink) === 'bond'
+}
+
+function isRuntimeVlanLike(runtimeLink) {
+  return getRuntimeInfoKind(runtimeLink) === 'vlan'
+}
+
+function isRuntimeLoopback(runtimeInterface, runtimeLink) {
+  return Boolean(runtimeInterface?.internal || runtimeLink?.linkType === 'loopback')
+}
+
+function isRuntimeVirtualLike(runtimeInterface, runtimeLink) {
+  if (isRuntimeLoopback(runtimeInterface, runtimeLink)) return true
+  if (runtimeLink?.sysfsVirtual === true) return true
+  if (runtimeLink?.sysfsPhysical === true) return false
+  return Boolean(runtimeInterface?.virtual || runtimeInterface?.type === 'virtual')
+}
+
+function isRuntimePhysicalLike(runtimeInterface, runtimeLink) {
+  if (!runtimeInterface && !runtimeLink) return false
+  if (isRuntimeLoopback(runtimeInterface, runtimeLink)) return false
+  if (runtimeLink?.sysfsPhysical === true) return true
+  if (runtimeLink?.sysfsVirtual === true) return false
+  if (isRuntimeBridgeLike(runtimeLink) || isRuntimeBondLike(runtimeLink) || isRuntimeVlanLike(runtimeLink)) {
+    return false
+  }
+  if (isRuntimeVirtualLike(runtimeInterface, runtimeLink)) return false
+  if (runtimeInterface?.type === 'wireless' || runtimeInterface?.type === 'wired') return true
+  if (runtimeInterface && runtimeInterface.internal === false && runtimeInterface.virtual === false) return true
+  return false
+}
+
+function getConfigType(name, mergedConfig, runtimeInterface, runtimeLink) {
   if (mergedConfig.network.bridges?.[name]) return 'bridge'
   if (mergedConfig.network.bonds?.[name]) return 'bond'
   if (mergedConfig.network.vlans?.[name]) return 'vlan'
   if (mergedConfig.network.wifis?.[name]) return 'wifi'
   if (mergedConfig.network.ethernets?.[name]) return 'ethernet'
 
+  if (isRuntimeBridgeLike(runtimeLink)) return 'bridge'
+  if (isRuntimeBondLike(runtimeLink)) return 'bond'
+  if (isRuntimeVlanLike(runtimeLink)) return 'vlan'
   if (runtimeInterface?.type === 'wireless') return 'wifi'
-  if (isRuntimeLogicalInterface(name, runtimeInterface)) return 'other'
-  if (runtimeInterface) return 'ethernet'
+  if (isRuntimePhysicalLike(runtimeInterface, runtimeLink)) return 'ethernet'
+  if (runtimeInterface || runtimeLink) return 'other'
   return 'other'
 }
 
-function isEditableDevice(deviceType, runtimeInterface) {
+function isEditableDevice(deviceType, runtimeInterface, runtimeLink, hasConfigDefinition = false) {
   if (deviceType === 'wifi' || deviceType === 'other') return false
-  if (runtimeInterface?.internal) return false
+  if (runtimeInterface?.internal || runtimeLink?.linkType === 'loopback') return false
+  if (LOGICAL_TYPES.has(deviceType)) return hasConfigDefinition
   return true
 }
 
-function isRuntimeLogicalInterface(name, runtimeInterface) {
-  if (runtimeInterface?.internal) return true
-  if (runtimeInterface?.virtual || runtimeInterface?.type === 'virtual') return true
-  return RUNTIME_LOGICAL_NAME_PATTERNS.some(pattern => pattern.test(name))
+function isRuntimeLogicalInterface(runtimeInterface, runtimeLink) {
+  if (!runtimeInterface && !runtimeLink) return false
+  if (isRuntimeBridgeLike(runtimeLink) || isRuntimeBondLike(runtimeLink) || isRuntimeVlanLike(runtimeLink)) {
+    return true
+  }
+  return isRuntimeVirtualLike(runtimeInterface, runtimeLink)
 }
 
-function getDeviceRole(name, deviceType, runtimeInterface) {
+function getDeviceRole(name, deviceType, runtimeInterface, runtimeLink) {
   if (LOGICAL_TYPES.has(deviceType)) return 'logical'
-  if (['ethernet', 'wifi'].includes(deviceType) && !isRuntimeLogicalInterface(name, runtimeInterface)) {
+  if (['ethernet', 'wifi'].includes(deviceType) && !isRuntimeLogicalInterface(runtimeInterface, runtimeLink)) {
     return 'physical'
   }
   return 'system'
 }
 
-function parseLogicalExtras(deviceType, netConfig) {
+function mergeInterfaceNameLists(...items) {
+  const merged = []
+  const seen = new Set()
+
+  for (const list of items) {
+    if (!Array.isArray(list)) continue
+
+    for (const item of list) {
+      const name = typeof item === 'string' ? item.trim() : ''
+      if (!name || seen.has(name)) continue
+      seen.add(name)
+      merged.push(name)
+    }
+  }
+
+  return merged
+}
+
+function getLogicalExtras(name, deviceType, netConfig, runtimeLink, runtimeMasterMembers = new Map()) {
   if (deviceType === 'bridge') {
     return {
-      interfaces: Array.isArray(netConfig?.interfaces) ? [...netConfig.interfaces] : [],
+      interfaces: mergeInterfaceNameLists(netConfig?.interfaces, runtimeMasterMembers.get(name)),
       link: '',
       vlanId: undefined,
       bondMode: undefined,
@@ -596,7 +674,7 @@ function parseLogicalExtras(deviceType, netConfig) {
 
   if (deviceType === 'bond') {
     return {
-      interfaces: Array.isArray(netConfig?.interfaces) ? [...netConfig.interfaces] : [],
+      interfaces: mergeInterfaceNameLists(netConfig?.interfaces, runtimeMasterMembers.get(name)),
       link: '',
       vlanId: undefined,
       bondMode: typeof netConfig?.parameters?.mode === 'string' ? netConfig.parameters.mode : 'active-backup',
@@ -606,8 +684,10 @@ function parseLogicalExtras(deviceType, netConfig) {
   if (deviceType === 'vlan') {
     return {
       interfaces: [],
-      link: typeof netConfig?.link === 'string' ? netConfig.link : '',
-      vlanId: Number.isInteger(netConfig?.id) ? netConfig.id : undefined,
+      link: typeof netConfig?.link === 'string' && netConfig.link.trim() ? netConfig.link.trim() : (runtimeLink?.linkName || ''),
+      vlanId: Number.isInteger(netConfig?.id)
+        ? netConfig.id
+        : (Number.isInteger(runtimeLink?.vlanId) ? runtimeLink.vlanId : undefined),
       bondMode: undefined,
     }
   }
@@ -683,7 +763,7 @@ function getInterfaceStatus(runtimeInterface, runtimeLink) {
 }
 
 async function getRuntimeLinkMap() {
-  const { success, stdout } = await execSudo('ip -json link show')
+  const { success, stdout } = await execSudo('ip -json -d link show')
   if (!success || !stdout) {
     return new Map()
   }
@@ -692,15 +772,60 @@ async function getRuntimeLinkMap() {
     const links = JSON.parse(stdout)
     if (!Array.isArray(links)) return new Map()
 
+    const normalizedLinks = links
+      .filter(link => typeof link?.ifname === 'string' && link.ifname.trim())
+      .map(link => ({
+        ifindex: Number.isInteger(link.ifindex) ? link.ifindex : undefined,
+        ifname: link.ifname.trim(),
+        operstate: normalizeLinkOperState(link.operstate),
+        mac: typeof link.address === 'string' ? link.address : '',
+        flags: Array.isArray(link.flags) ? link.flags : [],
+        linkType: normalizeRuntimeLinkText(link.link_type),
+        infoKind: normalizeRuntimeLinkText(link.linkinfo?.info_kind),
+        infoSlaveKind: normalizeRuntimeLinkText(link.linkinfo?.info_slave_kind),
+        master: link.master,
+        link: link.link,
+        parentbus: typeof link.parentbus === 'string' ? link.parentbus.trim() : '',
+        parentdev: typeof link.parentdev === 'string' ? link.parentdev.trim() : '',
+        promiscuity: typeof link.promiscuity === 'number' ? link.promiscuity : 0,
+        vlanId: Number.isInteger(link.linkinfo?.info_data?.id) ? link.linkinfo.info_data.id : undefined,
+      }))
+
+    const runtimeSysfsMap = await getRuntimeSysfsNetMap(normalizedLinks.map(link => link.ifname))
+
+    const ifindexToName = new Map(
+      normalizedLinks
+        .filter(link => Number.isInteger(link.ifindex))
+        .map(link => [link.ifindex, link.ifname])
+    )
+    const resolveLinkedName = (value) => {
+      if (typeof value === 'string' && value.trim()) return value.trim()
+      if (Number.isInteger(value)) return ifindexToName.get(value) || ''
+      return ''
+    }
+
     return new Map(
-      links
-        .filter(link => typeof link?.ifname === 'string' && link.ifname.trim())
+      normalizedLinks
         .map(link => [
-          link.ifname.trim(),
+          link.ifname,
           {
-            operstate: normalizeLinkOperState(link.operstate),
-            mac: typeof link.address === 'string' ? link.address : '',
-            flags: Array.isArray(link.flags) ? link.flags : [],
+            classPath: runtimeSysfsMap.get(link.ifname)?.classPath || '',
+            resolvedPath: runtimeSysfsMap.get(link.ifname)?.resolvedPath || '',
+            sysfsVirtual: runtimeSysfsMap.get(link.ifname)?.isVirtual === true,
+            sysfsPhysical: runtimeSysfsMap.get(link.ifname)?.isPhysical === true,
+            ifindex: link.ifindex,
+            operstate: link.operstate,
+            mac: link.mac,
+            flags: link.flags,
+            linkType: link.linkType,
+            infoKind: link.infoKind,
+            infoSlaveKind: link.infoSlaveKind,
+            masterName: resolveLinkedName(link.master),
+            linkName: resolveLinkedName(link.link),
+            parentbus: link.parentbus,
+            parentdev: link.parentdev,
+            promiscuity: link.promiscuity,
+            vlanId: link.vlanId,
           },
         ])
     )
@@ -708,6 +833,37 @@ async function getRuntimeLinkMap() {
     console.error('解析 ip link 输出失败:', error)
     return new Map()
   }
+}
+
+function getRuntimeMasterMembers(runtimeLinkMap) {
+  const members = new Map()
+
+  for (const [name, runtimeLink] of runtimeLinkMap) {
+    const masterName = typeof runtimeLink?.masterName === 'string' ? runtimeLink.masterName.trim() : ''
+    if (!masterName) continue
+
+    if (!members.has(masterName)) {
+      members.set(masterName, [])
+    }
+    members.get(masterName).push(name)
+  }
+
+  return members
+}
+
+function getDisplayBridgeBondMemberNames(config, runtimeLinkMap, runtimeMasterMembers) {
+  const members = getBridgeBondMemberNames(config)
+
+  for (const [ownerName, runtimeMembers] of runtimeMasterMembers) {
+    const ownerLink = runtimeLinkMap.get(ownerName)
+    if (!isRuntimeBridgeLike(ownerLink) && !isRuntimeBondLike(ownerLink)) continue
+
+    for (const memberName of runtimeMembers) {
+      members.add(memberName)
+    }
+  }
+
+  return members
 }
 
 function buildMemberEthernetConfig(existingConfig = {}) {
@@ -735,35 +891,31 @@ function buildInterfaceSummary(
   mergedConfig,
   appConfig,
   statusOverride,
-  bridgeBondMemberNames = new Set()
+  bridgeBondMemberNames = new Set(),
+  runtimeMasterMembers = new Map()
 ) {
-  const deviceType = getConfigType(name, mergedConfig, runtimeInterface)
-  const role = getDeviceRole(name, deviceType, runtimeInterface)
+  const deviceType = getConfigType(name, mergedConfig, runtimeInterface, runtimeLink)
+  const role = getDeviceRole(name, deviceType, runtimeInterface, runtimeLink)
   const sectionName = CONFIG_SECTIONS[deviceType]
   const managed = sectionName ? Boolean(appConfig.network[sectionName]?.[name]) : false
+  const hasConfigDefinition = sectionName ? Boolean(mergedConfig.network[sectionName]?.[name]) : false
   const configSection = mergedConfig.network[CONFIG_SECTIONS[deviceType]]
   const netConfig = isPlainObject(configSection?.[name]) ? configSection[name] : {}
   const configuredIp4 = parseConfiguredIPv4(netConfig)
-  const isTailscaleIface = name === 'tailscale0' || name.startsWith('tailscale')
-  const logicalExtras = parseLogicalExtras(deviceType, netConfig)
+  const logicalExtras = getLogicalExtras(name, deviceType, netConfig, runtimeLink, runtimeMasterMembers)
   const isBridgeOrBondMember = deviceType === 'ethernet' && bridgeBondMemberNames.has(name)
-
-  let status = statusOverride || getInterfaceStatus(runtimeInterface, runtimeLink)
-  if (isTailscaleIface && statusOverride) {
-    status = statusOverride
-  }
 
   return {
     name,
     type: deviceType,
     role,
     managed,
-    editable: isEditableDevice(deviceType, runtimeInterface),
+    editable: isEditableDevice(deviceType, runtimeInterface, runtimeLink, hasConfigDefinition),
     deletable: role === 'logical' && managed,
     mac: runtimeInterface?.mac || runtimeLink?.mac || '',
     ip4: isBridgeOrBondMember ? '' : runtimeInterface?.ip4 || configuredIp4 || '',
     ip6: isBridgeOrBondMember ? '' : runtimeInterface?.ip6 || '',
-    status,
+    status: statusOverride || getInterfaceStatus(runtimeInterface, runtimeLink),
     speed: runtimeInterface?.speed || 0,
     rx_bytes: stats?.rx_bytes || 0,
     tx_bytes: stats?.tx_bytes || 0,
@@ -781,17 +933,20 @@ async function getRuntimeGateway(interfaceName) {
   return match?.[1] || ''
 }
 
-function resolveInventoryType(name, mergedConfig, runtimeMap) {
+function resolveInventoryType(name, mergedConfig, runtimeMap, runtimeLinkMap) {
   const runtimeInterface = runtimeMap.get(name)
-  return getConfigType(name, mergedConfig, runtimeInterface)
+  const runtimeLink = runtimeLinkMap.get(name)
+  return getConfigType(name, mergedConfig, runtimeInterface, runtimeLink)
 }
 
-function ensureReferencedDeviceDeclared(config, baseMergedConfig, runtimeMap, interfaceName) {
+function ensureReferencedDeviceDeclared(config, baseMergedConfig, runtimeMap, runtimeLinkMap, interfaceName) {
   const previewConfig = deepMerge(baseMergedConfig, config)
-  const deviceType = resolveInventoryType(interfaceName, previewConfig, runtimeMap)
+  const deviceType = resolveInventoryType(interfaceName, previewConfig, runtimeMap, runtimeLinkMap)
+  const runtimeInterface = runtimeMap.get(interfaceName)
+  const runtimeLink = runtimeLinkMap.get(interfaceName)
 
   if (deviceType === 'ethernet') {
-    if (!runtimeMap.get(interfaceName) && !previewConfig.network.ethernets?.[interfaceName]) {
+    if (!runtimeInterface && !runtimeLink && !previewConfig.network.ethernets?.[interfaceName]) {
       throw new Error(`接口不存在: ${interfaceName}`)
     }
     if (!previewConfig.network.ethernets?.[interfaceName]) {
@@ -807,15 +962,19 @@ function ensureReferencedDeviceDeclared(config, baseMergedConfig, runtimeMap, in
   throw new Error(`接口 ${interfaceName} 不能作为逻辑网络成员或父接口`)
 }
 
-function validateOperationTarget(operation, runtimeMap, baseMergedConfig, currentAppConfig) {
+function validateOperationTarget(operation, runtimeMap, runtimeLinkMap, baseMergedConfig, currentAppConfig) {
   const runtimeInterface = runtimeMap.get(operation.name)
+  const runtimeLink = runtimeLinkMap.get(operation.name)
   const previewConfig = deepMerge(baseMergedConfig, currentAppConfig)
-  const currentType = resolveInventoryType(operation.name, previewConfig, runtimeMap)
+  const currentType = resolveInventoryType(operation.name, previewConfig, runtimeMap, runtimeLinkMap)
+  const currentDefinedLogical = LOGICAL_TYPES.has(currentType)
+    ? Boolean(getSection(previewConfig, currentType)?.[operation.name])
+    : false
   const existsInConfig = hasNetplanDefinition(operation.name, previewConfig)
   const declaredEthernet = previewConfig.network.ethernets?.[operation.name]
 
   if (operation.targetType === 'ethernet') {
-    if (!runtimeInterface && !declaredEthernet) {
+    if (!runtimeInterface && !runtimeLink && !declaredEthernet) {
       throw new Error(`物理网卡不存在: ${operation.name}`)
     }
     if (currentType !== 'ethernet') {
@@ -828,11 +987,15 @@ function validateOperationTarget(operation, runtimeMap, baseMergedConfig, curren
     throw new Error(`网络 ${operation.name} 已存在，且类型为 ${currentType}，不能直接改成 ${operation.targetType}`)
   }
 
-  if (runtimeInterface && currentType === 'ethernet') {
+  if (operation.action === 'upsert' && LOGICAL_TYPES.has(currentType) && !currentDefinedLogical) {
+    throw new Error(`逻辑网络 ${operation.name} 不在 netplan 配置文件中，不能直接编辑`)
+  }
+
+  if ((runtimeInterface || runtimeLink) && currentType === 'ethernet') {
     throw new Error(`物理网卡 ${operation.name} 不能作为逻辑网络名称`)
   }
 
-  if (['wifi', 'other'].includes(currentType) && (runtimeInterface || existsInConfig)) {
+  if (['wifi', 'other'].includes(currentType) && ((runtimeInterface || runtimeLink) || existsInConfig)) {
     throw new Error(`接口 ${operation.name} 不是可创建逻辑网络的对象`)
   }
 
@@ -841,7 +1004,7 @@ function validateOperationTarget(operation, runtimeMap, baseMergedConfig, curren
   }
 }
 
-function validateFinalTopology(finalMergedConfig, runtimeMap) {
+function validateFinalTopology(finalMergedConfig, runtimeMap, runtimeLinkMap) {
   const memberOwners = new Map()
   const registerMemberOwner = (member, owner) => {
     const existingOwner = memberOwners.get(member)
@@ -858,7 +1021,7 @@ function validateFinalTopology(finalMergedConfig, runtimeMap) {
     }
 
     for (const member of members) {
-      const memberType = resolveInventoryType(member, finalMergedConfig, runtimeMap)
+      const memberType = resolveInventoryType(member, finalMergedConfig, runtimeMap, runtimeLinkMap)
       if (!['ethernet', 'bond', 'vlan'].includes(memberType)) {
         throw new Error(`接口 ${member} 不能加入网桥 ${bridgeName}`)
       }
@@ -873,7 +1036,7 @@ function validateFinalTopology(finalMergedConfig, runtimeMap) {
     }
 
     for (const member of members) {
-      const memberType = resolveInventoryType(member, finalMergedConfig, runtimeMap)
+      const memberType = resolveInventoryType(member, finalMergedConfig, runtimeMap, runtimeLinkMap)
       if (memberType !== 'ethernet') {
         throw new Error(`接口 ${member} 不能加入 Bond ${bondName}`)
       }
@@ -883,7 +1046,7 @@ function validateFinalTopology(finalMergedConfig, runtimeMap) {
 
   for (const [vlanName, vlanConfig] of Object.entries(finalMergedConfig.network.vlans || {})) {
     const link = typeof vlanConfig.link === 'string' ? vlanConfig.link : ''
-    const linkType = resolveInventoryType(link, finalMergedConfig, runtimeMap)
+    const linkType = resolveInventoryType(link, finalMergedConfig, runtimeMap, runtimeLinkMap)
     if (!['ethernet', 'bond'].includes(linkType)) {
       throw new Error(`接口 ${link} 不能作为 VLAN ${vlanName} 的父接口`)
     }
@@ -929,22 +1092,6 @@ async function applyManagedNetplanConfig(data, options = {}) {
   }
 }
 
-/** 检测 Tailscale 是否已在线（tailscale0 在 ip link 中常为 state UNKNOWN，以 tailscale status 为准） */
-async function isTailscaleInterfaceUp() {
-  try {
-    const { stdout } = await execCommand('tailscale status --json 2>/dev/null')
-    if (!stdout || !stdout.trim()) return false
-    const data = JSON.parse(stdout)
-    if (data.BackendState === 'NeedsLogin' || data.BackendState === 'Stopped') return false
-    if (data.Self && data.Self.Online === false) return false
-    if (data.Self && data.Self.Online === true) return true
-    if (data.Self && data.Self.TailscaleIPs && data.Self.TailscaleIPs.length > 0) return true
-    return false
-  } catch (_) {
-    return false
-  }
-}
-
 /**
  * 获取网络接口列表
  */
@@ -960,11 +1107,13 @@ export const getNetworkInterfaces = async () => {
 
     const statsMap = new Map(networkStats.map(stat => [stat.iface, stat]))
     const runtimeMap = new Map(runtimeInterfaces.map(iface => [iface.iface, iface]))
-    const bridgeBondMemberNames = getBridgeBondMemberNames(mergedConfig)
+    const runtimeMasterMembers = getRuntimeMasterMembers(runtimeLinkMap)
+    const bridgeBondMemberNames = getDisplayBridgeBondMemberNames(
+      mergedConfig,
+      runtimeLinkMap,
+      runtimeMasterMembers
+    )
     const bridgeBondMemberOwners = getBridgeBondMemberOwners(mergedConfig)
-
-    const hasTailscale = runtimeInterfaces.some(i => i.iface === 'tailscale0' || i.iface.startsWith('tailscale'))
-    const tailscaleUp = hasTailscale ? await isTailscaleInterfaceUp() : false
 
     const names = []
     const seen = new Set()
@@ -975,6 +1124,7 @@ export const getNetworkInterfaces = async () => {
     }
 
     runtimeInterfaces.forEach(iface => pushName(iface.iface))
+    runtimeLinkMap.forEach((_, name) => pushName(name))
     for (const section of ['ethernets', 'bridges', 'bonds', 'vlans']) {
       Object.keys(mergedConfig.network[section] || {}).forEach(pushName)
     }
@@ -983,9 +1133,7 @@ export const getNetworkInterfaces = async () => {
       const runtimeInterface = runtimeMap.get(name)
       const runtimeLink = runtimeLinkMap.get(name)
 
-      let statusOverride = (name === 'tailscale0' || name.startsWith('tailscale'))
-        ? (tailscaleUp ? 'up' : 'down')
-        : undefined
+      let statusOverride
 
       if (!statusOverride && !runtimeInterface && !runtimeLink && bridgeBondMemberNames.has(name)) {
         const ownerNames = Array.from(bridgeBondMemberOwners.get(name) || [])
@@ -1005,7 +1153,8 @@ export const getNetworkInterfaces = async () => {
         mergedConfig,
         appConfig,
         statusOverride,
-        bridgeBondMemberNames
+        bridgeBondMemberNames,
+        runtimeMasterMembers
       )
     })
   } catch (error) {
@@ -1045,18 +1194,21 @@ export const getInterfaceDetails = async (interfaceName) => {
   try {
     validateInterfaceName(interfaceName)
 
-    const [runtimeInterfaces, mergedConfig, appConfig] = await Promise.all([
+    const [runtimeInterfaces, mergedConfig, appConfig, runtimeLinkMap] = await Promise.all([
       si.networkInterfaces(),
       loadMergedNetplanConfig(),
       loadAppNetplanConfig(),
+      getRuntimeLinkMap(),
     ])
 
     const runtimeMap = new Map(runtimeInterfaces.map(iface => [iface.iface, iface]))
     const runtimeInterface = runtimeMap.get(interfaceName)
-    const deviceType = getConfigType(interfaceName, mergedConfig, runtimeInterface)
+    const runtimeLink = runtimeLinkMap.get(interfaceName)
+    const deviceType = getConfigType(interfaceName, mergedConfig, runtimeInterface, runtimeLink)
 
     const sectionName = CONFIG_SECTIONS[deviceType]
     const netConfig = sectionName ? mergedConfig.network[sectionName]?.[interfaceName] : null
+    const hasConfigDefinition = Boolean(netConfig)
     const managed = Boolean(
       deviceType === 'ethernet'
         ? appConfig.network.ethernets?.[interfaceName]
@@ -1065,31 +1217,36 @@ export const getInterfaceDetails = async (interfaceName) => {
           : false
     )
 
-    if (!runtimeInterface && !netConfig) {
+    if (!runtimeInterface && !runtimeLink && !netConfig) {
       throw new Error(`网络接口不存在: ${interfaceName}`)
     }
 
     const configuredIp4 = parseConfiguredIPv4(netConfig)
     const configuredGateway = parseDefaultGateway(netConfig)
     const configuredDns = parseNameservers(netConfig)
-    const runtimeGateway = runtimeInterface ? await getRuntimeGateway(interfaceName) : ''
-    const bridgeBondMemberNames = getBridgeBondMemberNames(mergedConfig)
+    const runtimeGateway = (runtimeInterface || runtimeLink) ? await getRuntimeGateway(interfaceName) : ''
+    const runtimeMasterMembers = getRuntimeMasterMembers(runtimeLinkMap)
+    const bridgeBondMemberNames = getDisplayBridgeBondMemberNames(
+      mergedConfig,
+      runtimeLinkMap,
+      runtimeMasterMembers
+    )
     const isBridgeOrBondMember = deviceType === 'ethernet' && bridgeBondMemberNames.has(interfaceName)
 
     return {
       name: interfaceName,
       type: deviceType,
-      role: getDeviceRole(interfaceName, deviceType, runtimeInterface),
+      role: getDeviceRole(interfaceName, deviceType, runtimeInterface, runtimeLink),
       managed,
-      editable: isEditableDevice(deviceType, runtimeInterface),
+      editable: isEditableDevice(deviceType, runtimeInterface, runtimeLink, hasConfigDefinition),
       deletable: LOGICAL_TYPES.has(deviceType) && managed,
       method: isBridgeOrBondMember ? 'auto' : parseMethod(netConfig),
       ip4: isBridgeOrBondMember ? '' : configuredIp4 || runtimeInterface?.ip4 || '',
       ip6: isBridgeOrBondMember ? '' : runtimeInterface?.ip6 || '',
       gateway: isBridgeOrBondMember ? '' : configuredGateway || runtimeGateway,
       dns: isBridgeOrBondMember ? [] : configuredDns,
-      mac: runtimeInterface?.mac || '',
-      ...parseLogicalExtras(deviceType, netConfig),
+      mac: runtimeInterface?.mac || runtimeLink?.mac || '',
+      ...getLogicalExtras(interfaceName, deviceType, netConfig, runtimeLink, runtimeMasterMembers),
     }
   } catch (error) {
     console.error('获取网络接口详情错误:', error)
@@ -1124,10 +1281,11 @@ export const applyNetworkChanges = async ({ operations = [] } = {}) => {
       .sort((left, right) => (
         (LOGICAL_DELETE_PRIORITY[left.targetType] ?? 99) - (LOGICAL_DELETE_PRIORITY[right.targetType] ?? 99)
       ))
-    const [runtimeInterfaces, baseMergedConfig, takeoverNetplanFiles] = await Promise.all([
+    const [runtimeInterfaces, baseMergedConfig, takeoverNetplanFiles, runtimeLinkMap] = await Promise.all([
       si.networkInterfaces(),
       loadMergedNetplanConfig({ excludeApp: true }),
       listTakeoverNetplanFiles(),
+      getRuntimeLinkMap(),
     ])
     if (normalizedOperations.length === 0 && takeoverNetplanFiles.length === 0) {
       return { success: true, message: '没有需要应用的网络变更' }
@@ -1138,7 +1296,7 @@ export const applyNetworkChanges = async ({ operations = [] } = {}) => {
     const nextAppConfig = cloneData(currentAppConfig)
 
     for (const operation of normalizedOperations) {
-      validateOperationTarget(operation, runtimeMap, baseMergedConfig, nextAppConfig)
+      validateOperationTarget(operation, runtimeMap, runtimeLinkMap, baseMergedConfig, nextAppConfig)
 
       if (operation.action === 'delete') {
         delete getSection(nextAppConfig, operation.targetType)[operation.name]
@@ -1159,20 +1317,20 @@ export const applyNetworkChanges = async ({ operations = [] } = {}) => {
     for (const bridgeConfig of Object.values(nextAppConfig.network.bridges || {})) {
       const members = Array.isArray(bridgeConfig.interfaces) ? bridgeConfig.interfaces : []
       for (const member of members) {
-        ensureReferencedDeviceDeclared(nextAppConfig, baseMergedConfig, runtimeMap, member)
+        ensureReferencedDeviceDeclared(nextAppConfig, baseMergedConfig, runtimeMap, runtimeLinkMap, member)
       }
     }
 
     for (const bondConfig of Object.values(nextAppConfig.network.bonds || {})) {
       const members = Array.isArray(bondConfig.interfaces) ? bondConfig.interfaces : []
       for (const member of members) {
-        ensureReferencedDeviceDeclared(nextAppConfig, baseMergedConfig, runtimeMap, member)
+        ensureReferencedDeviceDeclared(nextAppConfig, baseMergedConfig, runtimeMap, runtimeLinkMap, member)
       }
     }
 
     for (const vlanConfig of Object.values(nextAppConfig.network.vlans || {})) {
       if (typeof vlanConfig.link === 'string' && vlanConfig.link) {
-        ensureReferencedDeviceDeclared(nextAppConfig, baseMergedConfig, runtimeMap, vlanConfig.link)
+        ensureReferencedDeviceDeclared(nextAppConfig, baseMergedConfig, runtimeMap, runtimeLinkMap, vlanConfig.link)
       }
     }
 
@@ -1183,7 +1341,7 @@ export const applyNetworkChanges = async ({ operations = [] } = {}) => {
     }
 
     const finalMergedConfig = deepMerge(baseMergedConfig, nextAppConfig)
-    validateFinalTopology(finalMergedConfig, runtimeMap)
+    validateFinalTopology(finalMergedConfig, runtimeMap, runtimeLinkMap)
 
     const hasBaseNetplanTakeover = takeoverNetplanFiles.length > 0
     const appNetplanData = hasBaseNetplanTakeover ? finalMergedConfig : nextAppConfig
