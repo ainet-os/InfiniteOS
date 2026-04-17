@@ -2,7 +2,7 @@ import si from 'systeminformation'
 import { getComputeResources } from './computeService.js'
 import { getVMs } from './vmService.js'
 import { getContainers } from './containerService.js'
-import { getModels } from './modelService.js'
+import { getLocalModels } from './modelService.js'
 import { getServices } from './serviceService.js'
 import { getNetworkInterfaces } from './networkService.js'
 import { getStorageDisks } from './storageService.js'
@@ -206,7 +206,8 @@ export const getOverviewSummary = async () => {
       computeResources,
       vms,
       containers,
-      models,
+      publicModels,
+      privateModels,
       services,
       networkInterfaces,
       storageDisks,
@@ -214,18 +215,23 @@ export const getOverviewSummary = async () => {
       timeoutPromise(getComputeResources()),
       timeoutPromise(getVMs()),
       timeoutPromise(getContainers()),
-      timeoutPromise(getModels()),
+      timeoutPromise(getLocalModels('public')),
+      timeoutPromise(getLocalModels('private')),
       timeoutPromise(getServices()),
       timeoutPromise(getNetworkInterfaces()),
       timeoutPromise(getStorageDisks()),
     ])
+
+    const totalModels =
+      (publicModels.status === 'fulfilled' ? publicModels.value.length : 0) +
+      (privateModels.status === 'fulfilled' ? privateModels.value.length : 0)
 
     // 处理资源统计
     const resourceStats = {
       compute: computeResources.status === 'fulfilled' ? computeResources.value.length : 0,
       vms: vms.status === 'fulfilled' ? vms.value.length : 0,
       containers: containers.status === 'fulfilled' ? containers.value.length : 0,
-      models: models.status === 'fulfilled' ? models.value.length : 0,
+      models: totalModels,
     }
 
     // 处理服务列表（取前4个）

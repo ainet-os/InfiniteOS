@@ -32,71 +32,52 @@ const kubectl = async (command) => {
   return stdout
 }
 
-/**
- * 获取Pods列表
- */
-export const getPods = async (namespace = 'default') => {
-  try {
-    const output = await kubectl(`get pods -n ${namespace} -o json`)
-    const data = JSON.parse(output)
-    
-    return data.items.map(pod => ({
-      name: pod.metadata.name,
-      namespace: pod.metadata.namespace,
-      status: pod.status.phase || 'Unknown',
-      node: pod.spec.nodeName || '',
-      restarts: pod.status.containerStatuses?.[0]?.restartCount || 0,
-      age: calculateAge(pod.metadata.creationTimestamp),
-    }))
-  } catch (error) {
-    console.error('获取Pods错误:', error)
-    return []
+const getCrictlPodItems = (payload) => {
+  if (Array.isArray(payload)) return payload
+  if (Array.isArray(payload?.items)) return payload.items
+  if (Array.isArray(payload?.pods)) return payload.pods
+  if (Array.isArray(payload?.sandboxes)) return payload.sandboxes
+  return []
+}
+
+const getCrictlPodMetadata = (pod) => {
+  if (pod?.metadata && typeof pod.metadata === 'object') return pod.metadata
+  if (pod?.podSandboxMetadata && typeof pod.podSandboxMetadata === 'object') return pod.podSandboxMetadata
+  return {}
+}
+
+const toCrictlPodSummary = (pod) => {
+  const metadata = getCrictlPodMetadata(pod)
+  const createdAt = pod?.createdAt ?? pod?.created_at ?? pod?.status?.createdAt ?? null
+  const status = pod?.state ?? pod?.status?.state ?? pod?.state?.state ?? null
+  const attempt = metadata?.attempt ?? pod?.attempt ?? 0
+
+  return {
+    name: metadata?.name || pod?.name || pod?.id || 'Unknown',
+    namespace: metadata?.namespace || pod?.namespace || '-',
+    status: status === null || status === undefined || status === '' ? 'Unknown' : String(status),
+    attempt: Number.isFinite(Number(attempt)) ? Number(attempt) : 0,
+    createdAt: createdAt === null || createdAt === undefined || createdAt === '' ? null : String(createdAt),
   }
 }
 
 /**
- * 获取Pod详情
+ * 获取本机 CRI Pod 列表
  */
-export const getPodDetails = async (namespace, name) => {
+export const getPods = async () => {
   try {
-    const output = await kubectl(`get pod ${name} -n ${namespace} -o json`)
-    const pod = JSON.parse(output)
-    
-    return {
-      name: pod.metadata.name,
-      namespace: pod.metadata.namespace,
-      status: pod.status.phase || 'Unknown',
-      node: pod.spec.nodeName || '',
-      restarts: pod.status.containerStatuses?.[0]?.restartCount || 0,
-      age: calculateAge(pod.metadata.creationTimestamp),
-      containers: pod.spec.containers.map(container => ({
-        name: container.name,
-        image: container.image,
-        ready: pod.status.containerStatuses?.find(c => c.name === container.name)?.ready || false,
-      })),
+    const { stdout, success, stderr } = await execSudo('crictl pods -o json', { timeout: 8000 })
+    if (!success || !stdout) {
+      if (stderr) {
+        console.warn('获取本机 Pods 失败:', stderr)
+      }
+      return []
     }
-  } catch (error) {
-    console.error('获取Pod详情错误:', error)
-    return null
-  }
-}
 
-/**
- * 删除Pod
- */
-export const deletePod = async (namespace, name) => {
-  await kubectl(`delete pod ${name} -n ${namespace}`)
-}
-
-/**
- * 获取Pod日志
- */
-export const getPodLogs = async (namespace, name, lines = 100) => {
-  try {
-    const output = await kubectl(`logs ${name} -n ${namespace} --tail=${lines}`)
-    return output.split('\n').filter(line => line.trim())
+    const data = JSON.parse(stdout)
+    return getCrictlPodItems(data).map(toCrictlPodSummary)
   } catch (error) {
-    console.error('获取Pod日志错误:', error)
+    console.error('获取本机 Pods 错误:', error)
     return []
   }
 }

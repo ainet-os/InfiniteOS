@@ -140,6 +140,8 @@ export default {
     namespace: 'Namespace',
     node: 'Node',
     restartCount: 'Restart Count',
+    attempt: 'Attempt',
+    createdAt: 'Created At',
     age: 'Age',
     noPods: 'No Pods',
     noVMs: 'No virtual machines',

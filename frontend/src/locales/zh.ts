@@ -139,6 +139,8 @@ export default {
     namespace: '命名空间',
     node: '节点',
     restartCount: '重启次数',
+    attempt: '尝试次数',
+    createdAt: '创建时间',
     age: '年龄',
     noPods: '暂无 Pods',
     noVMs: '暂无虚拟机',
