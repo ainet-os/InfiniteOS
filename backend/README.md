@@ -42,13 +42,11 @@ InfiniteOS 后端API服务器，面向云边端一体化场景，提供完整的
 - `POST /api/containers/images/pull` - 拉取镜像
 
 ### 6. 模型模块 (`/api/models`)
-- `GET /api/models` - 获取模型列表
-- `GET /api/models/:id` - 获取模型详情
-- `POST /api/models/upload` - 上传模型
-- `POST /api/models/sync` - 同步模型
-- `DELETE /api/models/:id` - 删除模型
-- `GET /api/models/config/repository` - 获取仓库配置
-- `PUT /api/models/config/repository` - 更新仓库配置
+- `POST /api/models/cloud/login` - 登录云端模型并获取 MinIO 凭据
+- `GET /api/models/local` - 获取本地模型列表（`type=public|private`）
+- `POST /api/models/cloud/list` - 获取云端模型列表
+- `POST /api/models/cloud/sync/:name` - 同步云端模型到本地
+- `DELETE /api/models/local/:name` - 删除本地模型（`type=public|private`）
 
 ### 7. 网络模块 (`/api/network`)
 - `GET /api/network/interfaces` - 获取网络接口列表

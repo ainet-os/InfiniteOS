@@ -60,6 +60,7 @@ rsync -a "${REPO_ROOT}/frontend/dist/" "${STAGE_DIR}/opt/iosm/frontend/dist/"
 
 echo "==> Installing systemd service and nginx config"
 install -d "${STAGE_DIR}/etc/iosm" "${STAGE_DIR}/etc/nginx/sites-available" "${STAGE_DIR}/lib/systemd/system"
+
 install -m 0644 "${TEMPLATE_DIR}/backend.env" "${STAGE_DIR}/etc/iosm/backend.env"
 install -m 0644 "${TEMPLATE_DIR}/iosm.conf" "${STAGE_DIR}/etc/nginx/sites-available/iosm.conf"
 install -m 0644 "${TEMPLATE_DIR}/iosm-backend.service" "${STAGE_DIR}/lib/systemd/system/iosm-backend.service"

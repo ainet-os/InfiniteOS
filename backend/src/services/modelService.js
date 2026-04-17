@@ -1,20 +1,23 @@
-import { execCommand, execSudo } from '../utils/exec.js'
+import { execCommand } from '../utils/exec.js'
 import fs from 'fs/promises'
+import { createWriteStream } from 'fs'
 import path from 'path'
-import { fileURLToPath } from 'url'
 import * as Minio from 'minio'
 
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
+const LOCAL_PUBLIC_MODELS_DIR = '/var/data/pubmodels'
+const LOCAL_PRIVATE_MODELS_DIR = '/var/data/primodels'
+const LOCAL_MODEL_DIR_MAP = {
+  public: LOCAL_PUBLIC_MODELS_DIR,
+  private: LOCAL_PRIVATE_MODELS_DIR,
+}
+const DEFAULT_CLOUD_CONSOLE_URL = 'https://console.ainet.uno'
+const CLOUD_LOGIN_PATH = '/api/tenants/minio-credentials/login'
+const CLOUD_LIST_OBJECT_LIMIT = 10000
 
-const MODELS_DIR = process.env.MODELS_DIR || '/var/lib/infiniteos/models'
-/** 本地模型根目录：一个子目录对应一个模型，目录名为模型名 */
-const LOCAL_MODELS_DIR = process.env.LOCAL_MODELS_DIR || '/var/data/pubmodels'
-const CONFIG_FILE = path.join(__dirname, '../../config/models.json')
+const normalizeLocalModelType = (type = 'public') => (type === 'private' ? 'private' : 'public')
+const normalizeCloudModelType = (type = 'public') => (type === 'private' ? 'private' : 'public')
+const getLocalModelsDir = (type = 'public') => LOCAL_MODEL_DIR_MAP[normalizeLocalModelType(type)]
 
-/**
- * 确保目录存在
- */
 const ensureDir = async (dirPath) => {
   try {
     await fs.mkdir(dirPath, { recursive: true })
@@ -23,738 +26,317 @@ const ensureDir = async (dirPath) => {
   }
 }
 
-/**
- * 读取配置文件
- */
-const readConfig = async () => {
-  try {
-    const data = await fs.readFile(CONFIG_FILE, 'utf8')
-    const config = JSON.parse(data)
-    // 兼容旧配置格式，转换为新格式
-    if (config.repositoryUrl && !config.apiEndpoint) {
+const parseApiEndpoint = (apiEndpoint) => {
+  const value = (apiEndpoint || '').trim()
+
+  if (value.startsWith('http://') || value.startsWith('https://')) {
+    try {
+      const url = new URL(value)
       return {
-        apiEndpoint: 'https://100.93.0.38:9000',
-        webConsole: 'https://100.93.0.38:9001',
-        accessKey: '',
-        secretKey: '',
-        bucket: 'pubmodels',
-        useSSL: true,
-        syncInterval: config.syncInterval || 'manual',
-        autoSync: config.autoSync || false,
+        host: url.hostname,
+        port: Number.parseInt(url.port, 10) || (url.protocol === 'https:' ? 443 : 80),
+        useSSL: url.protocol === 'https:',
       }
+    } catch (_) {
+      // fallback below
     }
-    return config
-  } catch (error) {
-    // 如果文件不存在，返回默认配置
+  }
+
+  const parts = value.split(':')
+  if (parts.length >= 2) {
     return {
-      apiEndpoint: 'https://100.93.0.38:9000',
-      webConsole: 'https://100.93.0.38:9001',
-      accessKey: '',
-      secretKey: '',
-      bucket: 'pubmodels',
-      useSSL: true,
-      syncInterval: 'manual',
-      autoSync: false,
+      host: parts.slice(0, -1).join(':').trim(),
+      port: Number.parseInt(parts[parts.length - 1], 10) || 9000,
+      useSSL: false,
     }
+  }
+
+  return {
+    host: value || 'localhost',
+    port: 9000,
+    useSSL: false,
   }
 }
 
-/**
- * 写入配置文件
- */
-const writeConfig = async (config) => {
-  await ensureDir(path.dirname(CONFIG_FILE))
-  await fs.writeFile(CONFIG_FILE, JSON.stringify(config, null, 2), 'utf8')
+const createMinioClient = ({ endpoint, accessKey, secretKey, useSSL = false }) => {
+  const { host, port, useSSL: useSSLFromUrl } = parseApiEndpoint(endpoint)
+  return new Minio.Client({
+    endPoint: host,
+    port: port || 9000,
+    useSSL: useSSL === true || useSSLFromUrl,
+    accessKey: (accessKey || '').trim(),
+    secretKey: (secretKey || '').trim(),
+  })
 }
 
-/**
- * 获取本地模型列表（/var/data/pubmodels 下每个子目录为一个模型，目录名为模型名）
- * 优化：先 readdir，再一次 du 批量取所有目录大小，避免 N 次子进程
- */
-export const getLocalModels = async () => {
+const buildCloudBucketInfo = (credentials, type = 'public') => {
+  const normalizedType = normalizeCloudModelType(type)
+
+  if (normalizedType === 'public') {
+    return {
+      bucket: 'pubmodels',
+      prefix: '',
+    }
+  }
+
+  const tenantBucket = (credentials.tenantBucket || '').trim()
+  if (!tenantBucket) {
+    throw new Error('租户存储桶不存在')
+  }
+
+  return {
+    bucket: tenantBucket,
+    prefix: 'models/',
+  }
+}
+
+const listModelPrefixes = async (minioClient, bucket, prefix = '') => {
+  const prefixes = new Map()
+  const stream = minioClient.listObjects(bucket, prefix, true)
+  let count = 0
+
+  for await (const obj of stream) {
+    const objectName = obj.name || ''
+    if (!objectName.startsWith(prefix)) {
+      continue
+    }
+
+    const relativeName = objectName.slice(prefix.length)
+    const parts = relativeName.split('/').filter(Boolean)
+    if (parts.length === 0) {
+      continue
+    }
+
+    const modelName = parts[0]
+    const current = prefixes.get(modelName) || 0
+    prefixes.set(modelName, current + (obj.size || 0))
+
+    count += 1
+    if (count >= CLOUD_LIST_OBJECT_LIMIT) {
+      break
+    }
+  }
+
+  return Array.from(prefixes.entries())
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([name, bytes]) => ({ name, size: formatBytes(bytes) }))
+}
+
+const formatBytes = (bytes) => {
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return '-'
+  }
+
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  let value = bytes
+  let index = 0
+
+  while (value >= 1024 && index < units.length - 1) {
+    value /= 1024
+    index += 1
+  }
+
+  const rounded = value >= 100 || index === 0 ? Math.round(value) : Math.round(value * 10) / 10
+  return `${rounded} ${units[index]}`
+}
+
+
+
+const ensureCloudCredentials = (credentials) => {
+  const endpoint = (credentials?.endpoint || '').trim()
+  const accessKey = (credentials?.accessKey || '').trim()
+  const secretKey = (credentials?.secretKey || '').trim()
+
+  if (!endpoint || !accessKey || !secretKey) {
+    throw new Error('云端登录信息不完整，请先登录')
+  }
+
+  return {
+    endpoint,
+    accessKey,
+    secretKey,
+    useSSL: credentials?.useSSL === true,
+    tenantBucket: (credentials?.tenantBucket || '').trim(),
+  }
+}
+
+export const loginCloudModels = async ({ consoleUrl = DEFAULT_CLOUD_CONSOLE_URL, email, password }) => {
+  const normalizedConsoleUrl = (consoleUrl || DEFAULT_CLOUD_CONSOLE_URL).trim().replace(/\/$/, '')
+  const normalizedEmail = (email || '').trim()
+  const normalizedPassword = password || ''
+
+  if (!normalizedEmail || !normalizedPassword) {
+    throw new Error('用户名和密码不能为空')
+  }
+
+  const response = await fetch(`${normalizedConsoleUrl}${CLOUD_LOGIN_PATH}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      email: normalizedEmail,
+      password: normalizedPassword,
+    }),
+  })
+
+  const payload = await response.json().catch(() => null)
+  if (!response.ok || payload?.code !== 200 || !payload?.data) {
+    throw new Error(payload?.message || '登录云端模型失败')
+  }
+
+  const data = payload.data
+  return {
+    endpoint: data.endpoint,
+    useSSL: data.useSSL === true,
+    accessKey: data.accessKey,
+    secretKey: data.secretKey,
+    tenantBucket: data.tenantBucket || '',
+    readonlyPublicBuckets: Array.isArray(data.readonlyPublicBuckets) ? data.readonlyPublicBuckets : [],
+    consoleUrl: normalizedConsoleUrl,
+  }
+}
+
+export const getLocalModels = async (type = 'public') => {
+  const localModelsDir = getLocalModelsDir(type)
+
   try {
-    await ensureDir(LOCAL_MODELS_DIR)
-    const entries = await fs.readdir(LOCAL_MODELS_DIR, { withFileTypes: true })
-    const dirs = entries.filter((e) => e.isDirectory())
-    if (dirs.length === 0) return []
-    const dirPaths = dirs.map((d) => path.join(LOCAL_MODELS_DIR, d.name))
+    await ensureDir(localModelsDir)
+    const entries = await fs.readdir(localModelsDir, { withFileTypes: true })
+    const dirs = entries.filter((entry) => entry.isDirectory())
+
+    if (dirs.length === 0) {
+      return []
+    }
+
+    const dirPaths = dirs.map((dir) => path.join(localModelsDir, dir.name))
     const sizeByPath = {}
+
     try {
       const { stdout } = await execCommand(
-        `du -sh ${dirPaths.map((p) => `"${p}"`).join(' ')} 2>/dev/null`,
+        `du -sh ${dirPaths.map((dirPath) => JSON.stringify(dirPath)).join(' ')} 2>/dev/null`,
         { maxBuffer: 1024 * 1024 }
       )
       const lines = (stdout || '').trim().split('\n').filter(Boolean)
       for (const line of lines) {
         const match = line.trim().match(/^(\S+)\s+(.+)$/)
-        if (match) sizeByPath[match[2].trim()] = match[1]
+        if (match) {
+          sizeByPath[match[2].trim()] = match[1]
+        }
       }
     } catch (_) {}
-    return dirs.map((d) => {
-      const modelPath = path.join(LOCAL_MODELS_DIR, d.name)
-      return { name: d.name, size: sizeByPath[modelPath] || '-' }
-    })
+
+    return dirs
+      .map((dir) => {
+        const modelPath = path.join(localModelsDir, dir.name)
+        return {
+          name: dir.name,
+          size: sizeByPath[modelPath] || '-',
+        }
+      })
+      .sort((a, b) => a.name.localeCompare(b.name))
   } catch (error) {
     console.error('获取本地模型列表错误:', error)
     return []
   }
 }
 
-/** 云端列表最多遍历的对象数，避免大桶卡死 */
-const CLOUD_LIST_OBJECT_LIMIT = 10000
-
-/**
- * 获取云端模型列表（存储桶中按前缀划分，每个顶层前缀为一个模型，前缀名为模型名）
- * 优化：限制遍历对象数量，大桶下也能较快返回
- */
-export const getCloudModels = async () => {
+export const getCloudModels = async (type = 'public', credentials) => {
   try {
-    const config = await readConfig()
-    if (!config.apiEndpoint || !config.bucket) {
+    const ensuredCredentials = ensureCloudCredentials(credentials)
+    const minioClient = createMinioClient(ensuredCredentials)
+    const { bucket, prefix } = buildCloudBucketInfo(ensuredCredentials, type)
+    const bucketExists = await minioClient.bucketExists(bucket)
+
+    if (!bucketExists) {
       return []
     }
-    if (!config.accessKey || !config.secretKey) {
-      return []
-    }
-    const minioClient = createMinioClient(config)
-    const bucketExists = await minioClient.bucketExists(config.bucket)
-    if (!bucketExists) return []
-    const prefixes = new Set()
-    const stream = minioClient.listObjects(config.bucket, '', true)
-    let count = 0
-    for await (const obj of stream) {
-      const parts = (obj.name || '').split('/').filter(Boolean)
-      if (parts.length > 0) prefixes.add(parts[0])
-      count++
-      if (count >= CLOUD_LIST_OBJECT_LIMIT) break
-    }
-    return Array.from(prefixes).sort().map((name) => ({ name, size: '-' }))
+
+    return await listModelPrefixes(minioClient, bucket, prefix)
   } catch (error) {
     console.error('获取云端模型列表错误:', error)
-    return []
-  }
-}
-
-/**
- * 获取本地模型详情（名称 + 目录下所有文件列表）
- */
-export const getLocalModelDetail = async (name) => {
-  if (!name || name.includes('..') || name.includes('/')) {
-    throw new Error('无效的模型名称')
-  }
-  const modelPath = path.join(LOCAL_MODELS_DIR, name)
-  try {
-    await fs.access(modelPath)
-  } catch (_) {
-    return null
-  }
-  const stat = await fs.stat(modelPath)
-  if (!stat.isDirectory()) return null
-  const entries = await fs.readdir(modelPath, { withFileTypes: true })
-  const files = []
-  for (const e of entries) {
-    const fullPath = path.join(modelPath, e.name)
-    const st = await fs.stat(fullPath).catch(() => null)
-    files.push({
-      name: e.name,
-      size: st && st.isFile() ? st.size : (st && st.isDirectory() ? '-' : '0'),
-    })
-  }
-  let totalSize = '0'
-  try {
-    const { stdout } = await execCommand(`du -sh "${modelPath}" 2>/dev/null | cut -f1`)
-    totalSize = (stdout || '0').trim()
-  } catch (_) {}
-  return { name, size: totalSize, files }
-}
-
-/**
- * 获取云端模型详情（名称 + 该前缀下所有对象列表）
- */
-export const getCloudModelDetail = async (name) => {
-  if (!name || name.includes('..') || name.includes('/')) {
-    throw new Error('无效的模型名称')
-  }
-  const config = await readConfig()
-  if (!config.apiEndpoint || !config.bucket || !config.accessKey || !config.secretKey) {
-    throw new Error('未配置云端仓库')
-  }
-  const minioClient = createMinioClient(config)
-  const prefix = name + '/'
-  const files = []
-  const stream = minioClient.listObjects(config.bucket, prefix, true)
-  for await (const obj of stream) {
-    const shortName = (obj.name || '').replace(prefix, '') || obj.name
-    files.push({ name: shortName, size: obj.size != null ? obj.size : '-' })
-  }
-  return { name, size: '-', files }
-}
-
-/**
- * 同步单个云端模型到本地（下载到 /var/data/pubmodels/模型名）
- */
-export const syncModelByName = async (name) => {
-  if (!name || name.includes('..') || name.includes('/')) {
-    throw new Error('无效的模型名称')
-  }
-  const config = await readConfig()
-  if (!config.apiEndpoint || !config.accessKey || !config.secretKey || !config.bucket) {
-    throw new Error('未完整配置云端仓库信息')
-  }
-  const minioClient = createMinioClient(config)
-  const bucketExists = await minioClient.bucketExists(config.bucket)
-  if (!bucketExists) {
-    throw new Error(`存储桶 ${config.bucket} 不存在`)
-  }
-  const prefix = name + '/'
-  const objects = []
-  const stream = minioClient.listObjects(config.bucket, prefix, true)
-  for await (const obj of stream) {
-    objects.push(obj)
-  }
-  const localModelDir = path.join(LOCAL_MODELS_DIR, name)
-  await ensureDir(localModelDir)
-  for (const obj of objects) {
-    const data = await minioClient.getObject(config.bucket, obj.name)
-    const chunks = []
-    for await (const chunk of data) chunks.push(chunk)
-    const fileBuffer = Buffer.concat(chunks)
-    const relativePath = obj.name.replace(prefix, '')
-    const localFilePath = path.join(localModelDir, relativePath)
-    const fileDir = path.dirname(localFilePath)
-    if (fileDir !== localModelDir) {
-      await ensureDir(fileDir)
-    }
-    await fs.writeFile(localFilePath, fileBuffer)
-  }
-  return { message: '同步成功', name }
-}
-
-/**
- * 删除本地模型（删除 /var/data/pubmodels/模型名 目录）
- */
-export const deleteLocalModel = async (name) => {
-  if (!name || name.includes('..') || name.includes('/')) {
-    throw new Error('无效的模型名称')
-  }
-  const modelPath = path.join(LOCAL_MODELS_DIR, name)
-  try {
-    await fs.rm(modelPath, { recursive: true, force: true })
-  } catch (e) {
-    if (e.code === 'ENOENT') throw new Error('模型不存在')
-    throw e
-  }
-  return { message: '删除成功' }
-}
-
-/**
- * 获取模型列表（兼容旧接口，从本地目录读取）
- */
-export const getModels = async () => {
-  try {
-    await ensureDir(MODELS_DIR)
-    const files = await fs.readdir(MODELS_DIR, { withFileTypes: true })
-    
-    const models = []
-    let id = 1
-
-    for (const file of files) {
-      if (file.isDirectory()) {
-        const modelPath = path.join(MODELS_DIR, file.name)
-        const infoPath = path.join(modelPath, 'info.json')
-        
-        let modelInfo = {
-          name: file.name,
-          version: 'v1.0.0',
-          type: 'llm',
-          source: 'local',
-          size: '0',
-          status: 'ready',
-        }
-
-        try {
-          const infoData = await fs.readFile(infoPath, 'utf8')
-          modelInfo = { ...modelInfo, ...JSON.parse(infoData) }
-        } catch (error) {
-          // 如果没有info.json，使用默认值
-        }
-
-        // 计算目录大小
-        try {
-          const { stdout } = await execCommand(`du -sh "${modelPath}" | cut -f1`)
-          modelInfo.size = stdout.trim()
-        } catch (error) {
-          // 忽略错误
-        }
-
-        // 读取模型目录下的文件列表（排除info.json）
-        let files = []
-        try {
-          const dirFiles = await fs.readdir(modelPath)
-          files = dirFiles.filter(f => f !== 'info.json' && !f.startsWith('.'))
-        } catch (error) {
-          // 忽略错误
-        }
-
-        models.push({
-          id: id++,
-          ...modelInfo,
-          files: files,
-        })
-      }
-    }
-
-    return models
-  } catch (error) {
-    console.error('获取模型列表错误:', error)
-    return []
-  }
-}
-
-/**
- * 获取模型详情
- */
-export const getModelDetails = async (modelId) => {
-  const models = await getModels()
-  return models.find(m => m.id === modelId) || null
-}
-
-/**
- * 从 apiEndpoint 解析 host 和 port（支持 "host:port" 或 "https://host:port"）
- */
-const parseApiEndpoint = (apiEndpoint) => {
-  const s = (apiEndpoint || '').trim()
-  if (s.startsWith('http://') || s.startsWith('https://')) {
-    try {
-      const u = new URL(s)
-      return { host: u.hostname, port: parseInt(u.port, 10) || (u.protocol === 'https:' ? 443 : 80), useSSL: u.protocol === 'https:' }
-    } catch (_) {
-      // fallback to split
-    }
-  }
-  const parts = s.split(':')
-  if (parts.length >= 2) {
-    const host = parts.slice(0, -1).join(':').trim()
-    const port = parseInt(parts[parts.length - 1], 10) || 9000
-    return { host, port, useSSL: false }
-  }
-  return { host: s || 'localhost', port: 9000, useSSL: false }
-}
-
-/**
- * 创建云端仓库客户端
- */
-const createMinioClient = (config) => {
-  const { host, port, useSSL: useSSLFromUrl } = parseApiEndpoint(config.apiEndpoint)
-  const useSSL = config.useSSL === true || useSSLFromUrl
-  return new Minio.Client({
-    endPoint: host,
-    port: port || 9000,
-    useSSL,
-    accessKey: (config.accessKey || '').trim(),
-    secretKey: (config.secretKey || '').trim(),
-  })
-}
-
-/**
- * 格式化字节大小
- */
-const formatBytes = (bytes) => {
-  if (bytes === 0) return '0 Bytes'
-  const k = 1024
-  const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i]
-}
-
-/**
- * 上传模型
- */
-export const uploadModel = async (modelData, files) => {
-  const { name, version, type, description } = modelData
-
-  if (!name) {
-    throw new Error('模型名称不能为空')
-  }
-
-  if (!files || files.length === 0) {
-    throw new Error('请选择要上传的模型文件')
-  }
-
-  try {
-    // 创建本地模型目录（与本地模型列表一致）
-    const modelDir = path.join(LOCAL_MODELS_DIR, name)
-    
-    // 检查模型是否已存在
-    try {
-      await fs.access(modelDir)
-      throw new Error(`模型 ${name} 已存在，请先删除或使用其他名称`)
-    } catch (error) {
-      if (error.message.includes('已存在')) {
-        throw error
-      }
-      // 目录不存在，继续创建
-    }
-
-    await ensureDir(modelDir)
-
-    // 保存模型信息
-    const modelInfo = {
-      name,
-      version: version || 'v1.0.0',
-      type: type || 'llm',
-      source: 'local',
-      description: description || '',
-      status: 'ready',
-      uploadedAt: new Date().toISOString(),
-    }
-
-    // 保存文件到本地
-    let totalSize = 0
-    for (const file of files) {
-      const fileBuffer = Buffer.isBuffer(file.buffer) ? file.buffer : Buffer.from(file.buffer)
-      totalSize += fileBuffer.length
-      
-      const fileName = file.originalname || file.name
-      const filePath = path.join(modelDir, fileName)
-      await fs.writeFile(filePath, fileBuffer)
-    }
-
-    modelInfo.size = formatBytes(totalSize)
-
-    // 保存模型信息到本地
-    const infoPath = path.join(modelDir, 'info.json')
-    await fs.writeFile(infoPath, JSON.stringify(modelInfo, null, 2), 'utf8')
-
-    return {
-      id: (await getModels()).length + 1,
-      ...modelInfo,
-      message: '模型上传成功',
-    }
-  } catch (error) {
-    console.error('上传模型错误:', error)
-    throw new Error(`上传模型失败: ${error.message}`)
-  }
-}
-
-/**
- * 同步模型
- */
-export const syncModels = async () => {
-  const config = await readConfig()
-  
-  if (!config.apiEndpoint || !config.accessKey || !config.secretKey || !config.bucket) {
-    throw new Error('未完整配置云端仓库信息（需要API端点、用户名、密码和存储桶）')
-  }
-
-  try {
-    console.log('开始同步模型，配置:', {
-      apiEndpoint: config.apiEndpoint,
-      bucket: config.bucket,
-      accessKey: config.accessKey ? '***' + config.accessKey.slice(-3) : '未设置',
-    })
-    
-    const minioClient = createMinioClient(config)
-    
-    // 检查存储桶是否存在
-    const bucketExists = await minioClient.bucketExists(config.bucket)
-    if (!bucketExists) {
-      throw new Error(`存储桶 ${config.bucket} 不存在`)
-    }
-
-    // 列出存储桶中的所有对象
-    const objectsStream = minioClient.listObjects(config.bucket, '', true)
-    const objects = []
-    
-    for await (const obj of objectsStream) {
-      objects.push(obj)
-    }
-
-    // 按目录分组对象（假设目录结构为 model-name/...）
-    const modelDirs = new Map()
-    for (const obj of objects) {
-      const parts = obj.name.split('/')
-      if (parts.length > 0 && parts[0]) {
-        const modelName = parts[0]
-        if (!modelDirs.has(modelName)) {
-          modelDirs.set(modelName, [])
-        }
-        modelDirs.get(modelName).push(obj)
-      }
-    }
-
-    const syncedModels = []
-    let syncedCount = 0
-
-    // 处理每个模型目录
-    for (const [modelName, modelObjects] of modelDirs.entries()) {
-      // 检查本地是否已存在该模型
-      const localModelDir = path.join(LOCAL_MODELS_DIR, modelName)
-      const localExists = await fs.access(localModelDir).then(() => true).catch(() => false)
-      
-      if (localExists) {
-        console.log(`模型 ${modelName} 已存在于本地，跳过同步`)
-        continue
-      }
-
-      // 查找info.json文件
-      const infoObj = modelObjects.find(obj => obj.name.endsWith('/info.json') || obj.name === `${modelName}/info.json`)
-      
-      let modelInfo = {
-        name: modelName,
-        version: 'v1.0.0',
-        type: 'llm',
-        source: 'cloud',
-        size: '0',
-        status: 'ready',
-        description: '从云端仓库同步的模型',
-      }
-
-      if (infoObj) {
-        try {
-          // 下载info.json
-          const data = await minioClient.getObject(config.bucket, infoObj.name)
-          const chunks = []
-          for await (const chunk of data) {
-            chunks.push(chunk)
-          }
-          const infoContent = Buffer.concat(chunks).toString('utf8')
-          const parsedInfo = JSON.parse(infoContent)
-          modelInfo = { ...modelInfo, ...parsedInfo, source: 'cloud' }
-        } catch (error) {
-          console.error(`读取模型 ${modelName} 的info.json失败:`, error)
-        }
-      }
-
-      // 创建本地模型目录
-      await ensureDir(localModelDir)
-
-      // 下载所有模型文件到本地
-      let totalSize = 0
-      for (const obj of modelObjects) {
-        try {
-          // 跳过info.json，稍后单独处理
-          if (obj.name.endsWith('/info.json') || obj.name === `${modelName}/info.json`) {
-            totalSize += obj.size || 0
-            continue
-          }
-
-          // 下载文件
-          const data = await minioClient.getObject(config.bucket, obj.name)
-          const chunks = []
-          for await (const chunk of data) {
-            chunks.push(chunk)
-          }
-          const fileBuffer = Buffer.concat(chunks)
-          totalSize += fileBuffer.length
-
-          // 获取文件相对路径（去掉模型名前缀）
-          const relativePath = obj.name.replace(`${modelName}/`, '')
-          const localFilePath = path.join(localModelDir, relativePath)
-          
-          // 确保子目录存在
-          const fileDir = path.dirname(localFilePath)
-          if (fileDir !== localModelDir) {
-            await ensureDir(fileDir)
-          }
-
-          // 保存到本地
-          await fs.writeFile(localFilePath, fileBuffer)
-        } catch (error) {
-          console.error(`下载文件 ${obj.name} 失败:`, error)
-        }
-      }
-
-      modelInfo.size = formatBytes(totalSize)
-
-      // 保存模型信息到本地
-      const infoPath = path.join(localModelDir, 'info.json')
-      await fs.writeFile(infoPath, JSON.stringify(modelInfo, null, 2), 'utf8')
-
-      syncedModels.push(modelInfo)
-      syncedCount++
-    }
-
-    return {
-      message: '同步完成',
-      synced: syncedCount,
-      models: syncedModels,
-    }
-  } catch (error) {
-    console.error('同步模型错误:', error)
-    
-    // 提供更友好的错误信息
-    let errorMessage = '同步模型失败'
-    if (error.code === 'InvalidAccessKeyId') {
-      errorMessage = '云端仓库认证失败：Access Key或Secret Key不正确，请检查配置'
-    } else if (error.code === 'SignatureDoesNotMatch') {
-      errorMessage = '云端仓库认证失败：Secret Key不正确，请检查配置'
-    } else if (error.code === 'NoSuchBucket') {
-      errorMessage = `存储桶 ${config.bucket} 不存在，请检查配置`
-    } else if (error.message.includes('ECONNREFUSED') || error.message.includes('getaddrinfo')) {
-      errorMessage = `无法连接到云端仓库服务器 ${config.apiEndpoint}，请检查网络连接和API端点配置`
-    } else if (error.message) {
-      errorMessage = `同步模型失败: ${error.message}`
-    }
-    
-    throw new Error(errorMessage)
-  }
-}
-
-/**
- * 更新模型信息
- */
-export const updateModel = async (modelId, modelData) => {
-  try {
-    console.log('更新模型:', { modelId, modelData })
-    const models = await getModels()
-    const model = models.find(m => m.id === modelId)
-    
-    if (!model) {
-      console.error('模型不存在，modelId:', modelId, '可用模型:', models.map(m => ({ id: m.id, name: m.name })))
-      throw new Error(`模型不存在 (ID: ${modelId})`)
-    }
-
-    console.log('找到模型:', { id: model.id, name: model.name })
-
-    const modelDir = path.join(MODELS_DIR, model.name)
-    const infoFile = path.join(modelDir, 'info.json')
-    
-    // 检查模型目录是否存在
-    try {
-      await fs.access(modelDir)
-      console.log('模型目录存在:', modelDir)
-    } catch (error) {
-      console.error('模型目录不存在:', modelDir)
-      throw new Error(`模型目录不存在: ${modelDir}`)
-    }
-    
-    // 读取现有信息
-    let info = {}
-    try {
-      const infoContent = await fs.readFile(infoFile, 'utf8')
-      info = JSON.parse(infoContent)
-      console.log('读取现有info.json成功:', Object.keys(info))
-    } catch (error) {
-      // 如果info.json不存在，创建新的
-      console.log('info.json不存在，创建新的')
-      info = {
-        name: model.name,
-        version: model.version || 'v1.0.0',
-        type: model.type || 'llm',
-        source: model.source || 'local',
-        size: model.size || '0',
-        status: model.status || 'ready',
-      }
-    }
-
-    // 更新信息
-    let finalModelDir = modelDir
-    if (modelData.name !== undefined && modelData.name && modelData.name.trim()) {
-      const newName = modelData.name.trim()
-      // 如果名称改变，需要重命名目录
-      if (newName !== model.name) {
-        const newModelDir = path.join(MODELS_DIR, newName)
-        // 检查新目录是否已存在
-        try {
-          await fs.access(newModelDir)
-          console.error('目标目录已存在:', newModelDir)
-          throw new Error(`模型名称 "${newName}" 已存在`)
-        } catch (error) {
-          if (error.message.includes('已存在')) {
-            throw error
-          }
-          // 目录不存在，可以重命名
-          console.log(`重命名模型目录: ${modelDir} -> ${newModelDir}`)
-          try {
-            await fs.rename(modelDir, newModelDir)
-            finalModelDir = newModelDir
-            info.name = newName
-            console.log('目录重命名成功')
-          } catch (renameError) {
-            console.error('目录重命名失败:', renameError)
-            throw new Error(`重命名模型目录失败: ${renameError.message}`)
-          }
-        }
-      } else {
-        info.name = newName
-      }
-    }
-    if (modelData.version !== undefined) {
-      info.version = modelData.version || ''
-    }
-    if (modelData.type !== undefined && modelData.type) {
-      info.type = modelData.type
-    }
-    if (modelData.description !== undefined) {
-      info.description = modelData.description || ''
-    }
-
-    // 保存更新后的信息
-    const finalInfoFile = path.join(finalModelDir, 'info.json')
-    console.log('保存info.json到:', finalInfoFile)
-    try {
-      await fs.writeFile(finalInfoFile, JSON.stringify(info, null, 2), 'utf8')
-      console.log('模型信息更新成功')
-    } catch (writeError) {
-      console.error('写入info.json失败:', writeError)
-      throw new Error(`保存模型信息失败: ${writeError.message}`)
-    }
-
-    // 返回更新后的模型信息（重新获取以确保ID正确）
-    const updatedModels = await getModels()
-    const updatedModel = updatedModels.find(m => m.name === info.name)
-    
-    return {
-      id: updatedModel ? updatedModel.id : modelId,
-      name: info.name,
-      version: info.version || '',
-      type: info.type,
-      source: info.source || model.source,
-      size: updatedModel ? updatedModel.size : info.size || '0',
-      status: info.status || model.status,
-      description: info.description || '',
-    }
-  } catch (error) {
-    console.error('updateModel错误:', error)
-    console.error('错误堆栈:', error.stack)
     throw error
   }
 }
 
-/**
- * 删除模型
- */
-export const deleteModel = async (modelId) => {
-  const models = await getModels()
-  const model = models.find(m => m.id === modelId)
-  
-  if (!model) {
-    throw new Error('模型不存在')
+
+
+export const syncCloudModelToLocal = async (name, type = 'public', credentials) => {
+  if (!name || name.includes('..') || name.includes('/')) {
+    throw new Error('无效的模型名称')
   }
 
-  const modelDir = path.join(MODELS_DIR, model.name)
-  await fs.rm(modelDir, { recursive: true, force: true })
+  const normalizedType = normalizeCloudModelType(type)
+  const localRootDir = getLocalModelsDir(normalizedType)
+  const localModelDir = path.join(localRootDir, name)
+  const ensuredCredentials = ensureCloudCredentials(credentials)
+  const minioClient = createMinioClient(ensuredCredentials)
+  const { bucket, prefix } = buildCloudBucketInfo(ensuredCredentials, normalizedType)
+  const modelPrefix = `${prefix}${name}/`
+  const objects = []
+  const stream = minioClient.listObjects(bucket, modelPrefix, true)
+
+  for await (const obj of stream) {
+    if (obj.name) {
+      objects.push(obj)
+    }
+  }
+
+  if (objects.length === 0) {
+    throw new Error('云端模型不存在')
+  }
+
+  await ensureDir(localRootDir)
+  await fs.rm(localModelDir, { recursive: true, force: true })
+  await ensureDir(localModelDir)
+
+  for (const obj of objects) {
+    const objectName = obj.name || ''
+    const relativePath = objectName.slice(modelPrefix.length)
+    if (!relativePath) {
+      continue
+    }
+
+    const localFilePath = path.join(localModelDir, relativePath)
+    await ensureDir(path.dirname(localFilePath))
+
+    await new Promise((resolve, reject) => {
+      const fileStream = createWriteStream(localFilePath)
+      fileStream.on('finish', resolve)
+      fileStream.on('error', reject)
+
+      minioClient.getObject(bucket, objectName)
+        .then((objectStream) => {
+          objectStream.on('error', reject)
+          objectStream.pipe(fileStream)
+        })
+        .catch(reject)
+    })
+  }
+
+  return {
+    message: '同步成功',
+    name,
+    path: localModelDir,
+    type: normalizedType,
+  }
 }
 
-/**
- * 获取模型配置
- */
-export const getModelConfig = async () => {
-  return await readConfig()
-}
+export const deleteLocalModel = async (name, type = 'public') => {
+  if (!name || name.includes('..') || name.includes('/')) {
+    throw new Error('无效的模型名称')
+  }
 
-/**
- * 更新模型配置
- */
-export const updateModelConfig = async (config) => {
+  const modelPath = path.join(getLocalModelsDir(type), name)
+
   try {
-    console.log('写入配置到文件:', CONFIG_FILE)
-    await writeConfig(config)
-    console.log('配置写入成功')
+    await fs.rm(modelPath, { recursive: true, force: true })
   } catch (error) {
-    console.error('写入配置失败:', error)
-    throw new Error(`保存配置失败: ${error.message}`)
+    if (error.code === 'ENOENT') {
+      throw new Error('模型不存在')
+    }
+    throw error
   }
-}
 
+  return { message: '删除成功' }
+}

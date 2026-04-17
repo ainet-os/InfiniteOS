@@ -11,6 +11,12 @@ if command -v nginx >/dev/null 2>&1; then
   nginx -t
 fi
 
+BACKEND_ENV=/etc/iosm/backend.env
+if [ ! -f "${BACKEND_ENV}" ]; then
+  touch "${BACKEND_ENV}"
+fi
+sed -i '/^MODELS_DIR=/d;/^DEPLOYMENTS_DIR=/d;/^LOCAL_MODELS_DIR=/d;/^LOCAL_PRIVATE_MODELS_DIR=/d;/^CLOUD_MODELS_ENDPOINT=/d;/^CLOUD_MODELS_ACCESS_KEY=/d;/^CLOUD_MODELS_SECRET_KEY=/d' "${BACKEND_ENV}"
+
 if [ -d /run/systemd/system ]; then
   systemctl daemon-reload
   systemctl enable iosm-backend.service
