@@ -36,7 +36,7 @@
               </tr>
             </thead>
             <tbody class="divide-y divide-gray-200 dark:divide-gray-800">
-              <tr v-for="pod in pods" :key="`${pod.namespace}:${pod.name}:${pod.attempt}`" class="hover:bg-gray-50 dark:hover:bg-white/[0.02]">
+              <tr v-for="pod in pagedPods" :key="`${pod.namespace}:${pod.name}:${pod.attempt}`" class="hover:bg-gray-50 dark:hover:bg-white/[0.02]">
                 <td class="px-6 py-4 text-sm font-medium text-gray-800 dark:text-white/90">{{ pod.name }}</td>
                 <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ pod.namespace }}</td>
                 <td class="px-6 py-4">
@@ -49,6 +49,16 @@
               </tr>
             </tbody>
           </table>
+          <ListPagination
+            v-if="pods.length > 0"
+            :total-items="podTotalItems"
+            :total-pages="podTotalPages"
+            :current-page="podCurrentPage"
+            :page-size="podPageSize"
+            :page-size-options="podPageSizeOptions"
+            @page-change="setPodPage"
+            @page-size-change="podPageSize = $event"
+          />
         </div>
       </div>
     </div>
@@ -58,11 +68,22 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue'
 import AdminLayout from '@/components/layout/AdminLayout.vue'
+import ListPagination from '@/components/ui/pagination/ListPagination.vue'
+import { usePagination } from '@/composables/usePagination'
 import { k8sApi } from '@/api/k8s'
 import type { Pod } from '@/api/k8s'
 
 const loading = ref(false)
 const pods = ref<Pod[]>([])
+const {
+  currentPage: podCurrentPage,
+  pageSize: podPageSize,
+  pageSizeOptions: podPageSizeOptions,
+  totalItems: podTotalItems,
+  totalPages: podTotalPages,
+  pagedItems: pagedPods,
+  setPage: setPodPage,
+} = usePagination(pods)
 let refreshInterval: number | null = null
 
 const loadPods = async () => {

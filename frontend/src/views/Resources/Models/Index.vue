@@ -89,12 +89,12 @@
         </div>
       </div>
 
-      <div class="space-y-6">
+      <div class="max-w-5xl space-y-5">
         <section class="overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
-          <div class="border-b border-gray-200 px-6 py-4 dark:border-gray-700">
+          <div class="border-b border-gray-200 px-5 py-3 dark:border-gray-700">
             <h2 class="text-lg font-medium text-gray-800 dark:text-white/90">本地模型</h2>
           </div>
-          <div class="flex items-center justify-between px-6 pt-4">
+          <div class="flex items-center justify-between px-5 pt-3">
             <div class="flex gap-2">
               <button
                 v-for="tab in modelTabs"
@@ -113,40 +113,31 @@
               {{ localLoading[localActiveTab] ? '刷新中...' : '刷新' }}
             </button>
           </div>
-          <div class="p-6">
-            <div class="mb-4 flex items-center justify-between gap-4">
-              <div class="text-sm text-gray-500 dark:text-gray-400">
-                共 {{ localModels[localActiveTab].length }} 条
+          <div class="p-5 pt-4">
+            <div v-if="localLoading[localActiveTab]" class="flex py-8 items-center justify-center text-center">
+              <div>
+                <div class="inline-block h-6 w-6 animate-spin rounded-full border-b-2 border-brand-500"></div>
+                <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">加载中...</p>
               </div>
-              <label class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
-                每页
-                <select
-                  v-model.number="localPageSize[localActiveTab]"
-                  class="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300"
-                >
-                  <option v-for="size in pageSizeOptions" :key="`local-size-${size}`" :value="size">{{ size }}</option>
-                </select>
-                条
-              </label>
-            </div>
-
-            <div v-if="localLoading[localActiveTab]" class="py-8 text-center">
-              <div class="inline-block h-6 w-6 animate-spin rounded-full border-b-2 border-brand-500"></div>
-              <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">加载中...</p>
             </div>
             <div
               v-else-if="localModels[localActiveTab].length === 0"
-              class="rounded-lg border border-dashed border-gray-300 px-4 py-10 text-center text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400"
+              class="flex items-center justify-center rounded-lg border border-dashed border-gray-300 px-4 py-6 text-center text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400"
             >
               {{ localActiveTab === 'public' ? '暂无公共本地模型' : '暂无私有本地模型' }}
             </div>
-            <div v-else class="overflow-x-auto">
-              <table class="w-full min-w-[720px]">
+            <div v-else class="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-800">
+              <table class="w-full table-fixed">
+                <colgroup>
+                  <col class="w-[56%]" />
+                  <col class="w-[18%]" />
+                  <col class="w-[26%]" />
+                </colgroup>
                 <thead class="bg-gray-50 dark:bg-white/[0.02]">
                   <tr>
-                    <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-600 dark:text-gray-400">名称</th>
-                    <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-600 dark:text-gray-400">大小</th>
-                    <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-600 dark:text-gray-400">操作</th>
+                    <th class="px-3 py-2 text-left text-xs font-medium uppercase text-gray-600 dark:text-gray-400">名称</th>
+                    <th class="px-3 py-2 text-left text-xs font-medium uppercase text-gray-600 dark:text-gray-400">大小</th>
+                    <th class="px-3 py-2 text-right text-xs font-medium uppercase text-gray-600 dark:text-gray-400">操作</th>
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-gray-200 dark:divide-gray-800">
@@ -155,13 +146,13 @@
                     :key="`local-${localActiveTab}-${model.name}`"
                     class="hover:bg-gray-50 dark:hover:bg-white/[0.02]"
                   >
-                    <td class="px-4 py-3 text-sm text-gray-800 dark:text-white/90">{{ model.name }}</td>
-                    <td class="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{{ model.size }}</td>
-                    <td class="px-4 py-3 text-right">
+                    <td class="truncate px-3 py-2 text-sm text-gray-800 dark:text-white/90" :title="model.name">{{ model.name }}</td>
+                    <td class="whitespace-nowrap px-3 py-2 text-sm text-gray-600 dark:text-gray-400">{{ model.size }}</td>
+                    <td class="px-3 py-2 text-right">
                       <button
                         @click="handleDeleteLocal(model.name, localActiveTab)"
                         :disabled="deletingLocal[localActiveTab] === model.name"
-                        class="rounded-lg bg-error-600 px-3 py-1.5 text-sm text-white transition-colors hover:bg-error-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-error-500 dark:hover:bg-error-600"
+                        class="min-w-[92px] rounded-lg bg-error-600 px-3 py-1.5 text-sm text-white transition-colors hover:bg-error-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-error-500 dark:hover:bg-error-600"
                       >
                         {{ deletingLocal[localActiveTab] === model.name ? '删除中...' : '删除' }}
                       </button>
@@ -171,17 +162,31 @@
               </table>
             </div>
 
-            <PaginationWithText
-              v-if="localTotalPages > 1"
-              :total-pages="localTotalPages"
-              :initial-page="localCurrentPage[localActiveTab]"
-              @page-change="(page) => handleLocalPageChange(localActiveTab, page)"
-            />
+            <div class="mt-3 flex flex-wrap items-center justify-between gap-3">
+              <label class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
+                每页
+                <select
+                  v-model.number="localPageSize[localActiveTab]"
+                  class="rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-sm text-gray-700 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300"
+                >
+                  <option v-for="size in pageSizeOptions" :key="`local-size-${size}`" :value="size">{{ size }}</option>
+                </select>
+                条，共 {{ localModels[localActiveTab].length }} 条
+              </label>
+
+              <div class="flex items-center gap-3">
+                <PaginationWithText
+                  :total-pages="localTotalPages"
+                  :initial-page="localCurrentPage[localActiveTab]"
+                  @page-change="(page) => handleLocalPageChange(localActiveTab, page)"
+                />
+              </div>
+            </div>
           </div>
         </section>
 
         <section class="overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
-          <div class="border-b border-gray-200 px-6 py-4 dark:border-gray-700">
+          <div class="border-b border-gray-200 px-5 py-3 dark:border-gray-700">
             <div class="flex items-center justify-between gap-4">
               <h2 class="text-lg font-medium text-gray-800 dark:text-white/90">云端模型</h2>
               <div class="flex items-center gap-3">
@@ -200,7 +205,7 @@
               </div>
             </div>
           </div>
-          <div class="flex items-center justify-between px-6 pt-4">
+          <div class="flex items-center justify-between px-5 pt-3">
             <div class="flex gap-2">
               <button
                 v-for="tab in modelTabs"
@@ -219,46 +224,37 @@
               {{ cloudLoading[cloudActiveTab] ? '刷新中...' : '刷新' }}
             </button>
           </div>
-          <div class="p-6">
-            <div class="mb-4 flex items-center justify-between gap-4">
-              <div class="text-sm text-gray-500 dark:text-gray-400">
-                共 {{ cloudModels[cloudActiveTab].length }} 条
-              </div>
-              <label class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
-                每页
-                <select
-                  v-model.number="cloudPageSize[cloudActiveTab]"
-                  class="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300"
-                >
-                  <option v-for="size in pageSizeOptions" :key="`cloud-size-${size}`" :value="size">{{ size }}</option>
-                </select>
-                条
-              </label>
-            </div>
-
+          <div class="p-5 pt-4">
             <div
               v-if="!cloudCredentials"
-              class="rounded-lg border border-dashed border-gray-300 px-4 py-10 text-center text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400"
+              class="flex items-center justify-center rounded-lg border border-dashed border-gray-300 px-4 py-6 text-center text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400"
             >
               请先登录云端模型
             </div>
-            <div v-else-if="cloudLoading[cloudActiveTab]" class="py-8 text-center">
-              <div class="inline-block h-6 w-6 animate-spin rounded-full border-b-2 border-brand-500"></div>
-              <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">加载中...</p>
+            <div v-else-if="cloudLoading[cloudActiveTab]" class="flex py-8 items-center justify-center text-center">
+              <div>
+                <div class="inline-block h-6 w-6 animate-spin rounded-full border-b-2 border-brand-500"></div>
+                <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">加载中...</p>
+              </div>
             </div>
             <div
               v-else-if="cloudModels[cloudActiveTab].length === 0"
-              class="rounded-lg border border-dashed border-gray-300 px-4 py-10 text-center text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400"
+              class="flex items-center justify-center rounded-lg border border-dashed border-gray-300 px-4 py-6 text-center text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400"
             >
               {{ cloudActiveTab === 'public' ? '暂无公共云端模型' : '暂无私有云端模型' }}
             </div>
-            <div v-else class="overflow-x-auto">
-              <table class="w-full min-w-[720px]">
+            <div v-else class="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-800">
+              <table class="w-full table-fixed">
+                <colgroup>
+                  <col class="w-[56%]" />
+                  <col class="w-[18%]" />
+                  <col class="w-[26%]" />
+                </colgroup>
                 <thead class="bg-gray-50 dark:bg-white/[0.02]">
                   <tr>
-                    <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-600 dark:text-gray-400">名称</th>
-                    <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-600 dark:text-gray-400">大小</th>
-                    <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-600 dark:text-gray-400">操作</th>
+                    <th class="px-3 py-2 text-left text-xs font-medium uppercase text-gray-600 dark:text-gray-400">名称</th>
+                    <th class="px-3 py-2 text-left text-xs font-medium uppercase text-gray-600 dark:text-gray-400">大小</th>
+                    <th class="px-3 py-2 text-right text-xs font-medium uppercase text-gray-600 dark:text-gray-400">操作</th>
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-gray-200 dark:divide-gray-800">
@@ -267,13 +263,13 @@
                     :key="`cloud-${cloudActiveTab}-${model.name}`"
                     class="hover:bg-gray-50 dark:hover:bg-white/[0.02]"
                   >
-                    <td class="px-4 py-3 text-sm text-gray-800 dark:text-white/90">{{ model.name }}</td>
-                    <td class="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{{ model.size }}</td>
-                    <td class="px-4 py-3 text-right">
+                    <td class="truncate px-3 py-2 text-sm text-gray-800 dark:text-white/90" :title="model.name">{{ model.name }}</td>
+                    <td class="whitespace-nowrap px-3 py-2 text-sm text-gray-600 dark:text-gray-400">{{ model.size }}</td>
+                    <td class="px-3 py-2 text-right">
                       <button
                         @click="handleSyncCloudModel(model.name, cloudActiveTab)"
                         :disabled="syncingCloud[cloudActiveTab] === model.name"
-                        class="rounded-lg bg-brand-500 px-3 py-1.5 text-sm text-white transition-colors hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-50"
+                        class="min-w-[92px] rounded-lg bg-brand-500 px-3 py-1.5 text-sm text-white transition-colors hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         {{ syncingCloud[cloudActiveTab] === model.name ? '同步中...' : '同步到本地' }}
                       </button>
@@ -283,12 +279,26 @@
               </table>
             </div>
 
-            <PaginationWithText
-              v-if="cloudTotalPages > 1"
-              :total-pages="cloudTotalPages"
-              :initial-page="cloudCurrentPage[cloudActiveTab]"
-              @page-change="(page) => handleCloudPageChange(cloudActiveTab, page)"
-            />
+            <div class="mt-3 flex flex-wrap items-center justify-between gap-3">
+              <label class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
+                每页
+                <select
+                  v-model.number="cloudPageSize[cloudActiveTab]"
+                  class="rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-sm text-gray-700 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300"
+                >
+                  <option v-for="size in pageSizeOptions" :key="`cloud-size-${size}`" :value="size">{{ size }}</option>
+                </select>
+                条，共 {{ cloudModels[cloudActiveTab].length }} 条
+              </label>
+
+              <div class="flex items-center gap-3">
+                <PaginationWithText
+                  :total-pages="cloudTotalPages"
+                  :initial-page="cloudCurrentPage[cloudActiveTab]"
+                  @page-change="(page) => handleCloudPageChange(cloudActiveTab, page)"
+                />
+              </div>
+            </div>
           </div>
         </section>
       </div>

@@ -28,7 +28,7 @@
               </tr>
             </thead>
             <tbody class="divide-y divide-gray-200 dark:divide-gray-800">
-              <tr v-for="disk in disks" :key="disk.device" class="hover:bg-gray-50 dark:hover:bg-white/[0.02]">
+              <tr v-for="disk in pagedDisks" :key="disk.device" class="hover:bg-gray-50 dark:hover:bg-white/[0.02]">
                 <td class="px-6 py-4 text-sm text-gray-800 dark:text-white/90">{{ disk.device }}</td>
                 <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400 max-w-[300px] break-words">{{ disk.mountpoint || '-' }}</td>
                 <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ disk.fstype || '-' }}</td>
@@ -66,6 +66,16 @@
               </tr>
             </tbody>
           </table>
+          <ListPagination
+            v-if="disks.length > 0"
+            :total-items="diskTotalItems"
+            :total-pages="diskTotalPages"
+            :current-page="diskCurrentPage"
+            :page-size="diskPageSize"
+            :page-size-options="diskPageSizeOptions"
+            @page-change="setDiskPage"
+            @page-size-change="diskPageSize = $event"
+          />
         </div>
       </div>
     </div>
@@ -179,6 +189,8 @@
 
 <script setup lang="ts">
 import AdminLayout from '@/components/layout/AdminLayout.vue'
+import ListPagination from '@/components/ui/pagination/ListPagination.vue'
+import { usePagination } from '@/composables/usePagination'
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { storageApi } from '@/api/storage'
@@ -194,6 +206,15 @@ const disks = ref<Array<{
   used: string
   usage: number
 }>>([])
+const {
+  currentPage: diskCurrentPage,
+  pageSize: diskPageSize,
+  pageSizeOptions: diskPageSizeOptions,
+  totalItems: diskTotalItems,
+  totalPages: diskTotalPages,
+  pagedItems: pagedDisks,
+  setPage: setDiskPage,
+} = usePagination(disks)
 
 // 对话框状态
 const showMountDialog = ref(false)

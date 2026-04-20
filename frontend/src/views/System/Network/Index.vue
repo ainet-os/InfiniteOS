@@ -62,7 +62,7 @@
             </thead>
             <tbody class="divide-y divide-gray-200 dark:divide-gray-800">
               <tr
-                v-for="iface in displayInterfaces"
+                v-for="iface in pagedInterfaces"
                 :key="iface.name"
                 :class="iface.pendingAction === 'delete' ? 'bg-red-50/40 dark:bg-red-500/5' : 'hover:bg-gray-50 dark:hover:bg-white/[0.02]'"
               >
@@ -156,6 +156,16 @@
               </tr>
             </tbody>
           </table>
+          <ListPagination
+            v-if="displayInterfaces.length > 0"
+            :total-items="interfaceTotalItems"
+            :total-pages="interfaceTotalPages"
+            :current-page="interfaceCurrentPage"
+            :page-size="interfacePageSize"
+            :page-size-options="interfacePageSizeOptions"
+            @page-change="setInterfacePage"
+            @page-size-change="interfacePageSize = $event"
+          />
         </div>
       </div>
     </div>
@@ -481,6 +491,8 @@
 
 <script setup lang="ts">
 import AdminLayout from '@/components/layout/AdminLayout.vue'
+import ListPagination from '@/components/ui/pagination/ListPagination.vue'
+import { usePagination } from '@/composables/usePagination'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { networkApi } from '@/api/network'
@@ -739,6 +751,16 @@ const displayInterfaces = computed<DisplayInterface[]>(() => {
       return left.name.localeCompare(right.name)
     })
 })
+
+const {
+  currentPage: interfaceCurrentPage,
+  pageSize: interfacePageSize,
+  pageSizeOptions: interfacePageSizeOptions,
+  totalItems: interfaceTotalItems,
+  totalPages: interfaceTotalPages,
+  pagedItems: pagedInterfaces,
+  setPage: setInterfacePage,
+} = usePagination(displayInterfaces)
 
 const pendingCount = computed(() => Object.keys(drafts.value).length)
 const applyButtonLabel = computed(() => (

@@ -401,7 +401,7 @@
                 </tr>
               </thead>
               <tbody class="divide-y divide-gray-200 dark:divide-gray-800">
-                <tr v-for="vm in vms" :key="vm.name" class="hover:bg-gray-50 dark:hover:bg-white/[0.02]">
+                <tr v-for="vm in pagedVirtualMachines" :key="vm.name" class="hover:bg-gray-50 dark:hover:bg-white/[0.02]">
                   <td class="px-3 py-3 text-sm whitespace-nowrap">
                     <router-link
                       :to="`/virtual-machines/${vm.name}`"
@@ -524,6 +524,16 @@
               </tbody>
             </table>
           </div>
+          <ListPagination
+            v-if="vms.length > 0"
+            :total-items="vmTotalItems"
+            :total-pages="vmTotalPages"
+            :current-page="vmCurrentPage"
+            :page-size="vmPageSize"
+            :page-size-options="vmPageSizeOptions"
+            @page-change="setVmPage"
+            @page-size-change="vmPageSize = $event"
+          />
         </div>
       </div>
     </div>
@@ -580,6 +590,8 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AdminLayout from '@/components/layout/AdminLayout.vue'
 import Modal from '@/components/ui/Modal.vue'
+import ListPagination from '@/components/ui/pagination/ListPagination.vue'
+import { usePagination } from '@/composables/usePagination'
 import {
   virtualMachinesApi,
   type CreateVMRequest,
@@ -662,6 +674,15 @@ const nextCreateFormItemId = (prefix: string) => {
 
 const loading = ref(false)
 const vms = ref<VirtualMachine[]>([])
+const {
+  currentPage: vmCurrentPage,
+  pageSize: vmPageSize,
+  pageSizeOptions: vmPageSizeOptions,
+  totalItems: vmTotalItems,
+  totalPages: vmTotalPages,
+  pagedItems: pagedVirtualMachines,
+  setPage: setVmPage,
+} = usePagination(vms)
 const showCreateDialog = ref(false)
 const deleteVmDialogOpen = ref(false)
 const deleteTargetVmName = ref('')

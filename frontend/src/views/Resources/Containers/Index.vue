@@ -743,7 +743,7 @@
                 </tr>
               </thead>
               <tbody class="divide-y divide-gray-200 dark:divide-gray-800">
-                <tr v-for="container in containers" :key="container.id" class="hover:bg-gray-50 dark:hover:bg-white/[0.02]">
+                <tr v-for="container in pagedContainers" :key="container.id" class="hover:bg-gray-50 dark:hover:bg-white/[0.02]">
                   <td class="px-3 py-2 text-sm">
                     <router-link
                       :to="`/containers/${container.name}`"
@@ -825,6 +825,16 @@
               </tbody>
             </table>
           </div>
+          <ListPagination
+            v-if="containers.length > 0"
+            :total-items="containerTotalItems"
+            :total-pages="containerTotalPages"
+            :current-page="containerCurrentPage"
+            :page-size="containerPageSize"
+            :page-size-options="containerPageSizeOptions"
+            @page-change="setContainerPage"
+            @page-size-change="containerPageSize = $event"
+          />
         </div>
       </div>
     </div>
@@ -836,6 +846,8 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import AdminLayout from '@/components/layout/AdminLayout.vue'
+import ListPagination from '@/components/ui/pagination/ListPagination.vue'
+import { usePagination } from '@/composables/usePagination'
 import { containersApi } from '@/api/containers'
 import type { Container } from '@/api/containers'
 
@@ -845,6 +857,15 @@ const router = useRouter()
 
 const loading = ref(false)
 const containers = ref<Container[]>([])
+const {
+  currentPage: containerCurrentPage,
+  pageSize: containerPageSize,
+  pageSizeOptions: containerPageSizeOptions,
+  totalItems: containerTotalItems,
+  totalPages: containerTotalPages,
+  pagedItems: pagedContainers,
+  setPage: setContainerPage,
+} = usePagination(containers)
 
 // 判断容器是否运行中
 const isContainerRunning = (container: Container): boolean => {

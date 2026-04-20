@@ -1,9 +1,9 @@
 <template>
-  <div class="flex items-center justify-between gap-2 px-6 py-4 sm:justify-normal">
+  <div class="flex flex-wrap items-center justify-end gap-2">
     <button
       @click="handlePageChange(currentPage - 1)"
       :disabled="currentPage === 1"
-      class="flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-2 py-2 text-sm font-medium text-gray-700 shadow-theme-xs hover:bg-gray-50 hover:text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.03] dark:hover:text-gray-200 sm:px-3.5 sm:py-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+      class="flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-2 py-2 text-sm font-medium text-gray-700 shadow-theme-xs hover:bg-gray-50 hover:text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.03] dark:hover:text-gray-200 sm:px-3 sm:py-2 disabled:opacity-50 disabled:cursor-not-allowed"
     >
       <span class="inline sm:hidden">
         <svg
@@ -22,45 +22,19 @@
           />
         </svg>
       </span>
-      <span class="hidden sm:inline">Previous</span>
+      <span class="hidden sm:inline">上一页</span>
     </button>
 
-    <span class="block text-sm font-medium text-gray-700 dark:text-gray-400 sm:hidden">
-      Page {{ currentPage }} of {{ totalPages }}
+    <span class="text-sm font-medium text-gray-600 dark:text-gray-400">
+      第 {{ currentPage }} / {{ safeTotalPages }} 页
     </span>
-
-    <ul class="hidden items-center gap-0.5 sm:flex">
-      <template v-for="(item, index) in pageNumbers" :key="index">
-        <li v-if="typeof item === 'number'">
-          <a
-            href="#"
-            @click.prevent="handlePageChange(item)"
-            :class="[
-              'flex items-center justify-center w-10 h-10 text-sm font-medium rounded-lg',
-              currentPage === item
-                ? 'text-white bg-brand-500 hover:bg-brand-600'
-                : 'text-gray-700 hover:bg-brand-500 hover:text-white dark:text-gray-400 dark:hover:text-white',
-            ]"
-          >
-            {{ item }}
-          </a>
-        </li>
-        <li v-else>
-          <span
-            class="flex items-center justify-center w-10 h-10 text-sm font-medium text-gray-700 dark:text-gray-400"
-          >
-            ...
-          </span>
-        </li>
-      </template>
-    </ul>
 
     <button
       @click="handlePageChange(currentPage + 1)"
-      :disabled="currentPage === totalPages"
-      class="flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-2 py-2 text-sm font-medium text-gray-700 shadow-theme-xs hover:bg-gray-50 hover:text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.03] dark:hover:text-gray-200 sm:px-3.5 sm:py-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+      :disabled="currentPage === safeTotalPages"
+      class="flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-2 py-2 text-sm font-medium text-gray-700 shadow-theme-xs hover:bg-gray-50 hover:text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.03] dark:hover:text-gray-200 sm:px-3 sm:py-2 disabled:opacity-50 disabled:cursor-not-allowed"
     >
-      <span class="hidden sm:inline">Next</span>
+      <span class="hidden sm:inline">下一页</span>
       <span class="inline sm:hidden">
         <svg
           class="fill-current"
@@ -83,7 +57,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 interface PaginationProps {
   totalPages: number
@@ -98,41 +72,14 @@ const props = withDefaults(defineProps<PaginationProps>(), {
 const emit = defineEmits(['pageChange'])
 
 const currentPage = ref(props.initialPage)
+const safeTotalPages = computed(() => Math.max(1, props.totalPages))
 
 const handlePageChange = (page: number) => {
-  if (page < 1 || page > props.totalPages) return
+  if (page < 1 || page > safeTotalPages.value) return
   currentPage.value = page
   emit('pageChange', page)
 }
 
-const pageNumbers = computed(() => {
-  const numbers = []
-  const maxVisiblePages = 7
-
-  if (props.totalPages <= maxVisiblePages) {
-    for (let i = 1; i <= props.totalPages; i++) {
-      numbers.push(i)
-    }
-  } else {
-    numbers.push(1)
-    if (currentPage.value > 3) numbers.push('ellipsis')
-
-    let start = Math.max(2, currentPage.value - 1)
-    let end = Math.min(props.totalPages - 1, currentPage.value + 1)
-
-    if (currentPage.value <= 3) end = 5
-    if (currentPage.value >= props.totalPages - 2) start = props.totalPages - 4
-
-    for (let i = start; i <= end; i++) {
-      numbers.push(i)
-    }
-
-    if (currentPage.value < props.totalPages - 2) numbers.push('ellipsis')
-    numbers.push(props.totalPages)
-  }
-
-  return numbers
-})
 
 watch(
   () => props.initialPage,

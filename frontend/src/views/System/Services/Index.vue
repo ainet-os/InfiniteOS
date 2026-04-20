@@ -22,7 +22,7 @@
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-200 dark:divide-gray-800">
-            <tr v-for="service in services" :key="service.name" class="hover:bg-gray-50 dark:hover:bg-white/[0.02]">
+            <tr v-for="service in pagedServices" :key="service.name" class="hover:bg-gray-50 dark:hover:bg-white/[0.02]">
               <td class="px-6 py-4 text-sm text-gray-800 dark:text-white/90">{{ service.name }}</td>
               <td class="px-6 py-4">
                 <span :class="[
@@ -72,6 +72,16 @@
             </tr>
           </tbody>
         </table>
+        <ListPagination
+          v-if="services.length > 0"
+          :total-items="serviceTotalItems"
+          :total-pages="serviceTotalPages"
+          :current-page="serviceCurrentPage"
+          :page-size="servicePageSize"
+          :page-size-options="servicePageSizeOptions"
+          @page-change="setServicePage"
+          @page-size-change="servicePageSize = $event"
+        />
       </div>
     </div>
     </div>
@@ -168,6 +178,8 @@
 
 <script setup lang="ts">
 import AdminLayout from '@/components/layout/AdminLayout.vue'
+import ListPagination from '@/components/ui/pagination/ListPagination.vue'
+import { usePagination } from '@/composables/usePagination'
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { servicesApi } from '@/api/services'
@@ -176,6 +188,15 @@ import type { SystemService, ServiceDetails } from '@/api/services'
 const { t: $t } = useI18n()
 const loading = ref(false)
 const services = ref<SystemService[]>([])
+const {
+  currentPage: serviceCurrentPage,
+  pageSize: servicePageSize,
+  pageSizeOptions: servicePageSizeOptions,
+  totalItems: serviceTotalItems,
+  totalPages: serviceTotalPages,
+  pagedItems: pagedServices,
+  setPage: setServicePage,
+} = usePagination(services)
 
 // 对话框状态
 const showDetailsDialog = ref(false)
