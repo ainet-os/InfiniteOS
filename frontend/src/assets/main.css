@@ -284,6 +284,48 @@ layer(base);
 .dark .custom-scrollbar::-webkit-scrollbar-thumb {
   background-color: #344054;
 }
+
+.app-content-scrollbar {
+  scrollbar-gutter: stable;
+  scrollbar-color: #98a2b3 #f2f4f7;
+  scrollbar-width: thin;
+}
+
+.app-content-scrollbar::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.app-content-scrollbar::-webkit-scrollbar-track {
+  background-color: #f2f4f7;
+}
+
+.app-content-scrollbar::-webkit-scrollbar-thumb {
+  background-color: #98a2b3;
+  border: 2px solid #f2f4f7;
+  border-radius: 9999px;
+}
+
+.app-content-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: #667085;
+}
+
+.dark .app-content-scrollbar {
+  scrollbar-color: #475467 #101828;
+}
+
+.dark .app-content-scrollbar::-webkit-scrollbar-track {
+  background-color: #101828;
+}
+
+.dark .app-content-scrollbar::-webkit-scrollbar-thumb {
+  background-color: #475467;
+  border-color: #101828;
+}
+
+.dark .app-content-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: #667085;
+}
 @layer utilities {
   /* For Remove Date Icon */
   input[type='date']::-webkit-inner-spin-button,
