@@ -357,17 +357,15 @@ const extractHarborError = (payload, fallback) => {
   return fallback
 }
 
-const parsePublicProjects = (scopeSummary = '', privateProject = '') => {
-  const matches = Array.from(scopeSummary.matchAll(/「([^」]+)」/g))
-    .map((match) => (match[1] || '').trim())
-    .filter(Boolean)
-
+const normalizePublicProjects = (projects, privateProject = '') => {
   const privateProjectName = String(privateProject || '').trim()
-  const publicProjects = matches.filter((project) =>
-    DEFAULT_PUBLIC_IMAGE_PROJECTS.includes(project) &&
-    project !== privateProjectName
-  )
-  return Array.from(new Set(publicProjects.length > 0 ? publicProjects : DEFAULT_PUBLIC_IMAGE_PROJECTS))
+  const apiProjects = Array.isArray(projects)
+    ? projects
+      .map((project) => String(project || '').trim())
+      .filter((project) => project && project !== privateProjectName)
+    : []
+
+  return Array.from(new Set(apiProjects.length > 0 ? apiProjects : DEFAULT_PUBLIC_IMAGE_PROJECTS))
 }
 
 const ensureCloudCredentials = (credentials = {}) => {
@@ -380,11 +378,10 @@ const ensureCloudCredentials = (credentials = {}) => {
   const robotUsername = (credentials.robotUsername || '').trim()
   const apiKey = (credentials.apiKey || '').trim()
   const privateProject = (credentials.privateProject || '').trim()
-  const publicProjects = Array.isArray(credentials.publicProjects)
-    ? credentials.publicProjects
-      .map((project) => String(project || '').trim())
-      .filter((project) => DEFAULT_PUBLIC_IMAGE_PROJECTS.includes(project) && project !== privateProject)
-    : parsePublicProjects(credentials.scopeSummary || '', privateProject)
+  const publicProjects = normalizePublicProjects(
+    credentials.publicProjects,
+    privateProject,
+  )
 
   if (!robotUsername || !apiKey) {
     throw new Error('云端登录信息不完整，请先登录')
@@ -412,7 +409,7 @@ const getCloudProjects = (type = 'public', credentials) => {
     return [credentials.privateProject]
   }
 
-  return DEFAULT_PUBLIC_IMAGE_PROJECTS
+  return credentials.publicProjects?.length ? credentials.publicProjects : DEFAULT_PUBLIC_IMAGE_PROJECTS
 }
 
 const buildUrl = (baseUrl, pathname, params = {}) => {
@@ -780,7 +777,7 @@ export const loginCloudImages = async ({ consoleUrl = DEFAULT_CLOUD_CONSOLE_URL,
     registryHost,
     registryAlias,
     privateProject,
-    publicProjects: parsePublicProjects(data.scopeSummary || '', privateProject),
+    publicProjects: normalizePublicProjects(data.publicProjects, privateProject),
     robotUsername: data.robotUsername || '',
     apiKey: data.apiKey || '',
     scopeSummary: data.scopeSummary || '',
