@@ -108,7 +108,7 @@ npm run dev
 
 后端需要以下系统工具：
 - `virsh` - 虚拟机管理（可选）
-- `docker` 或 `podman` - 容器管理（可选）
+- `docker` - 容器管理（可选）
 - `kubectl` - k3s资源管理（可选）
 - `systemctl` - 服务管理
 - `journalctl` - 日志查看
@@ -125,4 +125,3 @@ npm run dev
 ## 参考
 
 部分实现参考了 [Cockpit](https://cockpit-project.org/) 项目的设计思路。
-

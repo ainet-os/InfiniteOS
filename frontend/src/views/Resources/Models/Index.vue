@@ -194,7 +194,7 @@
                   v-if="cloudCredentials"
                   class="text-sm text-success-600 dark:text-success-400"
                 >
-                  已登录 {{ cloudCredentials.tenantBucket || '云端模型' }}
+                  已登录 {{ cloudCredentials.accountName || '云端模型' }}
                 </span>
                 <button
                   @click="openCloudLoginDialog"
@@ -416,6 +416,7 @@ const restoreCloudCredentials = (): CloudCredentials | null => {
 
     return {
       consoleUrl: parsed.consoleUrl,
+      accountName: typeof parsed.accountName === 'string' ? parsed.accountName : '',
       endpoint: parsed.endpoint,
       useSSL: parsed.useSSL === true,
       accessKey: parsed.accessKey,
@@ -521,6 +522,8 @@ const loadCloudModels = async (type: ModelTabType) => {
 
 const openCloudLoginDialog = () => {
   cloudLoginError.value = ''
+  cloudLoginForm.value.email = cloudCredentials.value?.accountName || cloudLoginForm.value.email
+  cloudLoginForm.value.password = ''
   showCloudLoginDialog.value = true
 }
 
@@ -531,6 +534,8 @@ const handleCloudLogin = async () => {
     const credentials = await modelsApi.loginCloud(cloudLoginForm.value)
     cloudCredentials.value = credentials
     persistCloudCredentials(credentials)
+    cloudLoginForm.value.email = credentials.accountName
+    cloudLoginForm.value.password = ''
     showCloudLoginDialog.value = false
     cloudCurrentPage.value.public = 1
     cloudCurrentPage.value.private = 1

@@ -10,6 +10,7 @@ export interface CloudLoginRequest {
 
 export interface CloudCredentials {
   consoleUrl: string
+  accountName: string
   endpoint: string
   useSSL: boolean
   accessKey: string

@@ -1,7 +1,7 @@
 import { execSudo } from '../utils/exec.js'
 
 /**
- * 检测容器运行时（Docker或Podman）
+ * 检测容器运行时（Docker）
  */
 const checkContainerRuntime = async () => {
   try {
@@ -9,12 +9,7 @@ const checkContainerRuntime = async () => {
     if (dockerExists) {
       return 'docker'
     }
-    
-    const { success: podmanExists } = await execSudo('which podman')
-    if (podmanExists) {
-      return 'podman'
-    }
-    
+
     return null
   } catch (error) {
     return null
@@ -165,12 +160,12 @@ export const getContainerDetails = async (containerId) => {
 export const createContainer = async (config) => {
   const runtime = await checkContainerRuntime()
   if (!runtime) {
-    throw new Error('未找到容器运行时（Docker或Podman）')
+    throw new Error('未找到 Docker')
   }
 
   const { name, image, ports = [], volumes = [], environment = [], command = '', networkMode = 'bridge' } = config
 
-  // 构建docker/podman run命令
+  // 构建 docker run 命令
   let cmd = `${runtime} run -d`
   
   if (name) {
@@ -228,7 +223,7 @@ export const createContainer = async (config) => {
 export const importContainer = async (config) => {
   const runtime = await checkContainerRuntime()
   if (!runtime) {
-    throw new Error('未找到容器运行时（Docker或Podman）')
+    throw new Error('未找到 Docker')
   }
 
   const { importType, imageName, tarPath, importedImageName, containerName, pullIfNotExists, startAfterImport } = config
@@ -237,8 +232,8 @@ export const importContainer = async (config) => {
     // 清理镜像名称：移除可能的命令前缀和引号
     let cleanedImageName = (imageName || '').trim()
     if (cleanedImageName) {
-      // 移除 "docker pull" 或 "podman pull" 前缀
-      cleanedImageName = cleanedImageName.replace(/^(docker|podman)\s+pull\s+/i, '').trim()
+      // 移除 "docker pull" 前缀
+      cleanedImageName = cleanedImageName.replace(/^docker\s+pull\s+/i, '').trim()
       // 移除可能的引号
       cleanedImageName = cleanedImageName.replace(/^["']|["']$/g, '')
     }
@@ -705,14 +700,14 @@ export const updateContainerPorts = async (containerId, ports) => {
 export const pullImage = async (imageName) => {
   const runtime = await checkContainerRuntime()
   if (!runtime) {
-    throw new Error('未找到容器运行时')
+    throw new Error('未找到 Docker')
   }
 
   // 清理镜像名称：移除可能的命令前缀和引号
   let cleanedImageName = (imageName || '').trim()
   if (cleanedImageName) {
-    // 移除 "docker pull" 或 "podman pull" 前缀
-    cleanedImageName = cleanedImageName.replace(/^(docker|podman)\s+pull\s+/i, '').trim()
+    // 移除 "docker pull" 前缀
+    cleanedImageName = cleanedImageName.replace(/^docker\s+pull\s+/i, '').trim()
     // 移除可能的引号
     cleanedImageName = cleanedImageName.replace(/^["']|["']$/g, '')
   }

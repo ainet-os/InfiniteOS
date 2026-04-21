@@ -188,6 +188,8 @@ export default {
     overview: '系统概览',
     compute: '算力',
     virtualMachines: '虚拟机',
+    applications: '应用',
+    images: '镜像',
     containers: '容器',
     models: '模型',
     pods: 'Pods',
@@ -238,9 +240,13 @@ export default {
     },
     containers: {
       title: '容器管理',
-      description: '管理Docker/Podman容器',
+      description: '管理Docker容器',
       image: '镜像',
       ports: '端口',
+    },
+    images: {
+      title: '镜像管理',
+      description: '管理本地 Docker 镜像和云端 Harbor 镜像',
     },
     models: {
       title: '模型管理',

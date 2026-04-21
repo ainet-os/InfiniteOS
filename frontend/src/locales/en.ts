@@ -189,6 +189,8 @@ export default {
     overview: 'System Overview',
     compute: 'Compute',
     virtualMachines: 'Virtual Machines',
+    applications: 'Applications',
+    images: 'Images',
     containers: 'Containers',
     models: 'Models',
     pods: 'Pods',
@@ -239,9 +241,13 @@ export default {
     },
     containers: {
       title: 'Container Management',
-      description: 'Manage Docker/Podman containers',
+      description: 'Manage Docker containers',
       image: 'Image',
       ports: 'Ports',
+    },
+    images: {
+      title: 'Images',
+      description: 'Manage local Docker images and cloud Harbor images',
     },
     models: {
       title: 'Models',

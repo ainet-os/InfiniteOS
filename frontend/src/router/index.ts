@@ -86,6 +86,15 @@ const router = createRouter({
       },
     },
     {
+      path: '/applications/images',
+      name: 'Images',
+      component: () => import('../views/Resources/Images/Index.vue'),
+      meta: {
+        title: '镜像管理',
+        requiresAuth: true,
+      },
+    },
+    {
       path: '/containers',
       name: 'Containers',
       component: () => import('../views/Resources/Containers/Index.vue'),
@@ -233,6 +242,7 @@ router.beforeEach((to, from, next) => {
     '/signin': 'auth.signinTitle',
     '/compute': 'pages.compute.title',
     '/virtual-machines': 'pages.virtualMachines.title',
+    '/applications/images': 'pages.images.title',
     '/containers': 'pages.containers.title',
     '/models': 'pages.models.title',
     '/pods': 'menu.pods',

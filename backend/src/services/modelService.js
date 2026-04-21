@@ -187,6 +187,7 @@ export const loginCloudModels = async ({ consoleUrl = DEFAULT_CLOUD_CONSOLE_URL,
 
   const data = payload.data
   return {
+    accountName: normalizedEmail,
     endpoint: data.endpoint,
     useSSL: data.useSSL === true,
     accessKey: data.accessKey,

@@ -27,6 +27,7 @@ import systemRoutes from './src/routes/system.js'
 import computeRoutes from './src/routes/compute.js'
 import virtualMachineRoutes from './src/routes/virtualMachines.js'
 import containerRoutes from './src/routes/containers.js'
+import imageRoutes from './src/routes/images.js'
 import modelRoutes from './src/routes/models.js'
 import networkRoutes from './src/routes/network.js'
 import storageRoutes from './src/routes/storage.js'
@@ -43,6 +44,7 @@ app.use('/api/system', systemRoutes)
 app.use('/api/compute', computeRoutes)
 app.use('/api/virtual-machines', virtualMachineRoutes)
 app.use('/api/containers', containerRoutes)
+app.use('/api/images', imageRoutes)
 app.use('/api/models', modelRoutes)
 app.use('/api/network', networkRoutes)
 app.use('/api/storage', storageRoutes)

@@ -1040,7 +1040,7 @@ const validateImageName = () => {
   }
   
   // 检测是否包含命令前缀
-  if (/^(docker|podman)\s+pull\s+/i.test(imageName)) {
+  if (/^docker\s+pull\s+/i.test(imageName)) {
     imageNameError.value = t('common.imageNameFormatError')
   }
 }
@@ -1062,11 +1062,11 @@ const handleImportContainer = async () => {
   try {
     // 清理镜像名称：如果用户输入了完整的 docker pull 命令，只提取镜像名称部分
     let cleanedImageName = importForm.value.imageName?.trim() || ''
-    const hadCommandPrefix = /^(docker|podman)\s+pull\s+/i.test(cleanedImageName)
+    const hadCommandPrefix = /^docker\s+pull\s+/i.test(cleanedImageName)
     
     if (cleanedImageName) {
-      // 移除 "docker pull" 或 "podman pull" 前缀
-      cleanedImageName = cleanedImageName.replace(/^(docker|podman)\s+pull\s+/i, '').trim()
+      // 移除 "docker pull" 前缀
+      cleanedImageName = cleanedImageName.replace(/^docker\s+pull\s+/i, '').trim()
       // 移除可能的引号
       cleanedImageName = cleanedImageName.replace(/^["']|["']$/g, '')
     }

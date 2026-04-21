@@ -93,8 +93,40 @@
             </h2>
             <ul class="flex flex-col gap-1">
               <li v-for="(nav, index) in resourceItems" :key="nav.name || index">
+                <button
+                  v-if="nav.subItems"
+                  @click="toggleSubmenu(index, 'resource')"
+                  :class="[
+                    'menu-item group cursor-pointer',
+                    {
+                      'menu-item-active': isSubmenuOpen(index, 'resource') || isSubmenuActive(nav),
+                      'menu-item-inactive': !isSubmenuOpen(index, 'resource') && !isSubmenuActive(nav),
+                    },
+                    !isExpanded && !isHovered ? 'lg:justify-center' : 'lg:justify-start',
+                  ]"
+                >
+                  <span
+                    :class="[
+                      isSubmenuOpen(index, 'resource') || isSubmenuActive(nav)
+                        ? 'menu-item-icon-active'
+                        : 'menu-item-icon-inactive',
+                    ]"
+                  >
+                    <component :is="nav.icon" />
+                  </span>
+                  <span v-if="isExpanded || isHovered || isMobileOpen" class="menu-item-text">{{
+                    nav.name
+                  }}</span>
+                  <ChevronDownIcon
+                    v-if="isExpanded || isHovered || isMobileOpen"
+                    :class="[
+                      'ml-auto w-5 h-5 transition-transform duration-200',
+                      { 'rotate-180 text-brand-500': isSubmenuOpen(index, 'resource') },
+                    ]"
+                  />
+                </button>
                 <router-link
-                  v-if="nav.path"
+                  v-else-if="nav.path"
                   :to="nav.path"
                   :class="[
                     'menu-item group',
@@ -115,6 +147,30 @@
                     nav.name
                   }}</span>
                 </router-link>
+                <div
+                  v-if="nav.subItems && (isExpanded || isHovered || isMobileOpen)"
+                  :class="[
+                    'transition-all duration-300',
+                    isSubmenuOpen(index, 'resource') ? 'block' : 'hidden',
+                  ]"
+                >
+                  <ul class="mt-2 space-y-1 ml-9">
+                    <li v-for="subItem in nav.subItems" :key="subItem.name">
+                      <router-link
+                        :to="subItem.path"
+                        :class="[
+                          'menu-dropdown-item',
+                          {
+                            'menu-dropdown-item-active': isActive(subItem.path),
+                            'menu-dropdown-item-inactive': !isActive(subItem.path),
+                          },
+                        ]"
+                      >
+                        {{ subItem.name }}
+                      </router-link>
+                    </li>
+                  </ul>
+                </div>
               </li>
             </ul>
           </div>
@@ -573,7 +629,7 @@ import {
   HorizontalDots,
   ComputeIcon,
   ServerIcon,
-  ContainerIcon,
+  ArchiveIcon,
   ModelIcon,
   NetworkIcon,
   StorageIcon,
@@ -634,9 +690,18 @@ const resourceItems = computed<MenuItem[]>(() => [
     path: '/virtual-machines',
   },
   {
-    icon: ContainerIcon,
-    name: t('menu.containers'),
-    path: '/containers',
+    icon: ArchiveIcon,
+    name: t('menu.applications'),
+    subItems: [
+      {
+        name: t('menu.images'),
+        path: '/applications/images',
+      },
+      {
+        name: t('menu.containers'),
+        path: '/containers',
+      },
+    ],
   },
   {
     icon: ModelIcon,
@@ -715,7 +780,9 @@ const othersItems = computed<MenuItem[]>(() => [
 // 主菜单项（用于兼容原有结构）
 const menuItems: MenuItem[] = []
 
-const isActive = (path: string) => route.path === path
+const isActive = (path: string) => route.path === path || (path !== '/' && route.path.startsWith(`${path}/`))
+
+const isSubmenuActive = (nav: MenuItem) => Boolean(nav.subItems?.some((subItem) => isActive(subItem.path)))
 
 const toggleSubmenu = (index: number, menuType: string) => {
   const key = `${menuType}-${index}`
@@ -766,7 +833,7 @@ const autoExpandActiveSubmenu = () => {
   // 检查资源菜单
   if (!submenuMatched) {
     resourceItems.value.forEach((nav, index) => {
-      if (nav.path && isActive(nav.path)) {
+      if ((nav.path && isActive(nav.path)) || isSubmenuActive(nav)) {
         openSubmenu.value = `resource-${index}`
         submenuMatched = true
       }
@@ -808,4 +875,3 @@ onMounted(() => {
   autoExpandActiveSubmenu()
 })
 </script>
-
