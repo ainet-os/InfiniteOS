@@ -35,6 +35,7 @@ export interface LocalImage {
   id: string
   repository: string
   tag: string
+  diskUsage: string
   size: string
   created: string
   image: string

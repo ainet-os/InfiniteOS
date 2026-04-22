@@ -40,45 +40,49 @@ const parseImageName = (name = '') => {
   }
 }
 
-const normalizeLocalImage = (image) => {
-  let repository = image.Repository || image.repository || ''
-  let tag = image.Tag || image.tag || ''
-
-  if ((!repository || repository === '<none>') && Array.isArray(image.Names) && image.Names.length > 0) {
-    const parsed = parseImageName(image.Names[0])
-    repository = parsed.repository
-    tag = parsed.tag
+const normalizeLocalImageFromDockerImages = (line = '') => {
+  const match = line.trim().match(/^(\S+)\s+([A-Za-z0-9:_@.-]+)\s+(\S+)\s+(\S+)(?:\s+.*)?$/)
+  if (!match) {
+    return null
   }
 
-  repository = repository || '<none>'
-  tag = tag || '<none>'
+  const imageName = match[1] || ''
+  const imageId = match[2] || ''
+  const diskUsage = match[3] || '-'
+  const size = match[4] || '-'
+  const parsed = parseImageName(imageName)
+
+  if (!parsed.repository || parsed.repository === '<none>') {
+    return null
+  }
 
   return {
-    id: image.ID || image.Id || image.id || '',
-    repository,
-    tag,
-    size: image.Size || image.size || '-',
-    created: image.CreatedAt || image.Created || image.created || '-',
-    image: repository !== '<none>' && tag !== '<none>' ? `${repository}:${tag}` : repository,
+    id: imageId,
+    repository: parsed.repository,
+    tag: parsed.tag,
+    diskUsage,
+    size,
+    created: '-',
+    image: parsed.repository !== '<none>' && parsed.tag !== '<none>' ? `${parsed.repository}:${parsed.tag}` : parsed.repository,
   }
 }
 
-const parseLocalImages = (stdout = '') => {
-  const content = stdout.trim()
-  if (!content) {
-    return []
-  }
-
-  if (content.startsWith('[')) {
-    const parsed = JSON.parse(content)
-    return Array.isArray(parsed) ? parsed.map(normalizeLocalImage) : []
-  }
-
-  return content
+const parseDockerImagesTable = (stdout = '') => {
+  const lines = stdout
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean)
-    .map((line) => normalizeLocalImage(JSON.parse(line)))
+    .filter((line) => !line.startsWith('WARNING:') && !line.startsWith('IMAGE '))
+
+  const images = []
+  for (const line of lines) {
+    const normalized = normalizeLocalImageFromDockerImages(line)
+    if (normalized) {
+      images.push(normalized)
+    }
+  }
+
+  return images
 }
 
 const buildLocalImageReference = ({ id, repository, tag }) => {
@@ -561,7 +565,7 @@ const formatBytes = (bytes) => {
     return '-'
   }
 
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
   let value = numericBytes
   let index = 0
 
@@ -611,7 +615,7 @@ export const getLocalImages = async () => {
     return []
   }
 
-  const { stdout, success, stderr } = await execSudoFile(runtime, ['images', '--format', 'json'], {
+  const { stdout, success, stderr } = await execSudoFile(runtime, ['images'], {
     timeout: 20000,
   })
 
@@ -619,7 +623,7 @@ export const getLocalImages = async () => {
     throw new Error(stderr || '获取本地镜像列表失败')
   }
 
-  return parseLocalImages(stdout).sort((a, b) => {
+  return parseDockerImagesTable(stdout).sort((a, b) => {
     const left = `${a.repository}:${a.tag}`
     const right = `${b.repository}:${b.tag}`
     return left.localeCompare(right)
@@ -795,7 +799,7 @@ export const getCloudImages = async (type = 'public', credentials) => {
       repositories = await listHarborRepositories(ensuredCredentials, project)
     } catch (error) {
       console.error(`获取项目 ${project} 仓库列表失败:`, error)
-      continue
+      throw new Error(`获取项目「${project}」仓库列表失败：${error.message || '未知错误'}`)
     }
 
     for (const repository of repositories) {
@@ -810,6 +814,7 @@ export const getCloudImages = async (type = 'public', credentials) => {
         rows.push(...buildCloudImageRows(ensuredCredentials, project, repository, artifacts))
       } catch (error) {
         console.error(`获取镜像 ${repository.name || repositoryPath} 标签失败:`, error)
+        throw new Error(`获取镜像「${repository.name || repositoryPath}」标签失败：${error.message || '未知错误'}`)
       }
     }
   }

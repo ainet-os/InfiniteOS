@@ -217,16 +217,18 @@
             <div v-else class="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-800">
               <table class="w-full table-fixed">
                 <colgroup>
-                  <col class="w-[34%]" />
-                  <col class="w-[16%]" />
+                  <col class="w-[30%]" />
                   <col class="w-[14%]" />
-                  <col class="w-[20%]" />
-                  <col class="w-[16%]" />
+                  <col class="w-[13%]" />
+                  <col class="w-[13%]" />
+                  <col class="w-[18%]" />
+                  <col class="w-[12%]" />
                 </colgroup>
                 <thead class="bg-gray-50 dark:bg-white/[0.02]">
                   <tr>
                     <th class="px-3 py-2 text-left text-xs font-medium uppercase text-gray-600 dark:text-gray-400">仓库</th>
                     <th class="px-3 py-2 text-left text-xs font-medium uppercase text-gray-600 dark:text-gray-400">标签</th>
+                    <th class="px-3 py-2 text-left text-xs font-medium uppercase text-gray-600 dark:text-gray-400">磁盘占用</th>
                     <th class="px-3 py-2 text-left text-xs font-medium uppercase text-gray-600 dark:text-gray-400">大小</th>
                     <th class="px-3 py-2 text-left text-xs font-medium uppercase text-gray-600 dark:text-gray-400">镜像 ID</th>
                     <th class="px-3 py-2 text-right text-xs font-medium uppercase text-gray-600 dark:text-gray-400">操作</th>
@@ -243,6 +245,9 @@
                     </td>
                     <td class="truncate px-3 py-2 text-sm text-gray-600 dark:text-gray-400" :title="image.tag">
                       {{ image.tag }}
+                    </td>
+                    <td class="whitespace-nowrap px-3 py-2 text-sm text-gray-600 dark:text-gray-400">
+                      {{ image.diskUsage || '-' }}
                     </td>
                     <td class="whitespace-nowrap px-3 py-2 text-sm text-gray-600 dark:text-gray-400">
                       {{ image.size }}
