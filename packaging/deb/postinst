@@ -17,9 +17,9 @@ if [ ! -f "${BACKEND_ENV}" ]; then
 fi
 sed -i '/^MODELS_DIR=/d;/^DEPLOYMENTS_DIR=/d;/^LOCAL_MODELS_DIR=/d;/^LOCAL_PRIVATE_MODELS_DIR=/d;/^CLOUD_MODELS_ENDPOINT=/d;/^CLOUD_MODELS_ACCESS_KEY=/d;/^CLOUD_MODELS_SECRET_KEY=/d' "${BACKEND_ENV}"
 
+systemctl enable iosm-backend.service
 if [ -d /run/systemd/system ]; then
   systemctl daemon-reload
-  systemctl enable iosm-backend.service
   systemctl restart iosm-backend.service
   systemctl reload nginx || systemctl restart nginx
 fi
