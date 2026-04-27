@@ -1,10 +1,13 @@
-Package: iosm
+Package: __PKG_NAME__
 Version: __VERSION__
 Section: admin
 Priority: optional
 Architecture: __ARCH__
 Maintainer: InfiniteOS Maintainers <support@ai.net>
 Depends: nodejs (>= 20), nginx, systemd, docker.io, libvirt-clients, qemu-kvm, qemu-utils, libvirt-daemon-system, virtinst
+Provides: iosm
+Replaces: iosm
+Conflicts: iosm
 Installed-Size: __INSTALLED_SIZE__
 Description: InfiniteOS management platform (backend + frontend)
  InfiniteOS provides a web-based management plane for compute, containers,
