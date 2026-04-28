@@ -18,7 +18,7 @@ const { init, reset, stop } = useSessionTimeout(5) // 5分钟超时
 
 let cleanup: (() => void) | null = null
 
-// 监听用户活动事件（从API拦截器触发）
+// 监听显式触发的用户活动事件（如路由切换、登录初始化）
 const handleUserActivity = () => {
   reset()
 }
@@ -36,7 +36,7 @@ onMounted(() => {
   // 初始化会话超时管理
   cleanup = init() || null
   
-  // 监听API调用触发的用户活动事件
+  // 监听显式触发的用户活动事件
   window.addEventListener('user-activity', handleUserActivity)
   // 监听会话初始化事件
   window.addEventListener('session-initialize', handleSessionInitialize)

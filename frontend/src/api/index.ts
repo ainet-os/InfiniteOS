@@ -20,10 +20,6 @@ api.interceptors.request.use(
     const token = localStorage.getItem('token')
     if (token) {
       config.headers.Authorization = `Bearer ${token}`
-      
-      // 重置会话超时（API调用也算用户活动）
-      // 通过自定义事件通知会话管理器
-      window.dispatchEvent(new CustomEvent('user-activity'))
     }
     return config
   },
@@ -35,8 +31,6 @@ api.interceptors.request.use(
 // 响应拦截器
 api.interceptors.response.use(
   (response) => {
-    // 成功的API响应也算用户活动
-    window.dispatchEvent(new CustomEvent('user-activity'))
     return response.data
   },
   (error) => {
