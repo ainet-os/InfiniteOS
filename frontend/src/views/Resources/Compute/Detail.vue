@@ -14,17 +14,17 @@
               返回列表
             </button>
             <h1 class="text-2xl font-semibold text-gray-800 dark:text-white/90">算力设备详情</h1>
-            <p class="text-gray-600 dark:text-gray-400 mt-1">{{ device.name }}</p>
+            <p class="text-gray-600 dark:text-gray-400 mt-1">{{ device?.name || `设备 #${deviceId}` }}</p>
           </div>
           <div class="flex gap-2">
             <button
-              v-if="device.status === 'unavailable'"
+              v-if="device?.status === 'unavailable'"
               class="px-4 py-2 bg-success-600 dark:bg-success-500 text-white rounded-lg hover:bg-success-700 dark:hover:bg-success-600"
             >
               启用
             </button>
             <button
-              v-if="device.status === 'available'"
+              v-if="device?.status === 'available'"
               class="px-4 py-2 bg-error-600 dark:bg-error-500 text-white rounded-lg hover:bg-error-700 dark:hover:bg-error-600"
             >
               禁用
@@ -33,9 +33,24 @@
         </div>
       </div>
 
-      <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
+      <div v-if="loading && !device" class="rounded-lg bg-white dark:bg-white/[0.03] border border-gray-200 dark:border-gray-800 p-6 text-sm text-gray-600 dark:text-gray-400">
+        正在加载设备详情...
+      </div>
+
+      <div v-else-if="error && !device" class="rounded-lg border border-error-200 bg-error-50 p-6 text-sm text-error-700 dark:border-error-500/30 dark:bg-error-500/10 dark:text-error-300">
+        {{ error }}
+      </div>
+
+      <div v-else-if="device" class="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <!-- 主要信息 -->
         <div class="lg:col-span-2 space-y-6">
+          <div
+            v-if="error"
+            class="rounded-lg border border-warning-200 bg-warning-50 p-4 text-sm text-warning-700 dark:border-warning-500/30 dark:bg-warning-500/10 dark:text-warning-300"
+          >
+            {{ error }}
+          </div>
+
           <!-- 基本信息 -->
           <div class="rounded-lg bg-white dark:bg-white/[0.03] border border-gray-200 dark:border-gray-800 p-6">
             <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90 mb-4">基本信息</h2>
@@ -55,6 +70,10 @@
               <div>
                 <p class="text-sm text-gray-600 dark:text-gray-400">显存</p>
                 <p class="mt-1 text-gray-800 dark:text-white/90 font-medium">{{ device.memory }}</p>
+              </div>
+              <div v-if="device.memoryUsed">
+                <p class="text-sm text-gray-600 dark:text-gray-400">已用显存</p>
+                <p class="mt-1 text-gray-800 dark:text-white/90 font-medium">{{ device.memoryUsed }}</p>
               </div>
               <div>
                 <p class="text-sm text-gray-600 dark:text-gray-400">状态</p>
@@ -234,9 +253,13 @@ import { useRoute } from 'vue-router'
 import type { ApexOptions } from 'apexcharts'
 import AdminLayout from '@/components/layout/AdminLayout.vue'
 import VueApexCharts from 'vue3-apexcharts'
+import { computeApi } from '@/api/compute'
+import type { ComputeDevice } from '@/api/compute'
 
 const route = useRoute()
-const deviceId = parseInt(route.params.id as string)
+const deviceId = parseInt(route.params.id as string, 10)
+const HISTORY_POINTS = 13
+const POLL_INTERVAL_MS = 10000
 
 interface DeviceTask {
   id: number
@@ -251,6 +274,7 @@ interface DeviceDetail {
   vendor: string
   compute: string
   memory: string
+  memoryUsed?: string
   utilization: number
   memoryUsage: number
   status: 'available' | 'unavailable'
@@ -264,42 +288,96 @@ interface DeviceDetail {
   tasks: DeviceTask[]
 }
 
-const device = ref<DeviceDetail>({
-  id: deviceId,
-  name: 'NVIDIA GeForce RTX 4090',
-  vendor: 'NVIDIA',
-  compute: '83 TFLOPS (FP32)',
-  memory: '24 GB',
-  utilization: 65,
-  memoryUsage: 58,
-  status: 'available',
-  temperature: 72,
-  power: '450W / 600W',
-  driver: '535.154.05',
-  cudaVersion: '12.2',
-  computeCapability: '8.9',
-  powerLimit: '600W',
-  note: '高性能GPU，适用于AI训练和推理',
-  tasks: [
-    {
-      id: 1,
-      name: 'llama-inference',
-      type: 'AI推理',
-      gpuUsage: 45,
-    },
-    {
-      id: 2,
-      name: 'stable-diffusion',
-      type: '图像生成',
-      gpuUsage: 20,
-    },
-  ],
+const device = ref<DeviceDetail | null>(null)
+const loading = ref(true)
+const error = ref('')
+
+const gpuSeriesData = ref<number[]>([])
+const memorySeriesData = ref<number[]>([])
+const temperatureSeriesData = ref<number[]>([])
+const powerSeriesData = ref<number[]>([])
+
+const parseNumericValue = (value?: string | null) => {
+  if (!value) return null
+  const match = value.match(/(\d+(?:\.\d+)?)/)
+  return match ? Number(match[1]) : null
+}
+
+const parseMemoryToMB = (value?: string | null) => {
+  const numericValue = parseNumericValue(value)
+  if (numericValue === null) return null
+  if (value?.toUpperCase().includes('GB')) {
+    return Math.round(numericValue * 1024)
+  }
+  return Math.round(numericValue)
+}
+
+const calculateMemoryUsage = (raw: ComputeDevice) => {
+  if (typeof raw.memoryUsage === 'number') {
+    return Math.max(0, Math.min(100, Math.round(raw.memoryUsage)))
+  }
+
+  const totalMb = parseMemoryToMB(raw.memory)
+  const usedMb = parseMemoryToMB(raw.memoryUsed)
+  if (!totalMb || usedMb === null) {
+    return 0
+  }
+
+  return Math.max(0, Math.min(100, Math.round((usedMb / totalMb) * 100)))
+}
+
+const extractPowerLimit = (power?: string | null) => {
+  if (!power) return undefined
+  const parts = power.split('/')
+  return parts[1]?.trim() || undefined
+}
+
+const extractPowerDraw = (power?: string | null) => {
+  return Math.round(parseNumericValue(power?.split('/')[0]?.trim()) || 0)
+}
+
+const createSeedSeries = (value: number) => Array.from({ length: HISTORY_POINTS }, () => value)
+
+const appendSeriesPoint = (series: typeof gpuSeriesData, value: number) => {
+  const nextValues = series.value.slice(-(HISTORY_POINTS - 1))
+  nextValues.push(value)
+  series.value = nextValues
+}
+
+const normalizeDevice = (raw: ComputeDevice): DeviceDetail => ({
+  ...raw,
+  memoryUsage: calculateMemoryUsage(raw),
+  powerLimit: raw.powerLimit || extractPowerLimit(raw.power),
+  tasks: [],
 })
 
-const gpuSeriesData = ref<number[]>([45, 52, 48, 61, 58, 65, 62, 68, 65, 70, 65, 72, 65])
-const memorySeriesData = ref<number[]>([42, 48, 45, 52, 50, 55, 58, 56, 58, 60, 58, 62, 58])
-const temperatureSeriesData = ref<number[]>([65, 68, 66, 70, 69, 72, 71, 73, 72, 74, 72, 75, 72])
-const powerSeriesData = ref<number[]>([380, 420, 400, 450, 435, 470, 460, 480, 470, 490, 450, 500, 450])
+const applyDeviceData = (detail: DeviceDetail) => {
+  const firstLoad = !device.value
+  device.value = detail
+
+  if (firstLoad) {
+    gpuSeriesData.value = createSeedSeries(detail.utilization)
+    memorySeriesData.value = createSeedSeries(detail.memoryUsage)
+    temperatureSeriesData.value = detail.temperature !== null ? createSeedSeries(detail.temperature) : []
+    powerSeriesData.value = detail.power ? createSeedSeries(extractPowerDraw(detail.power)) : []
+    return
+  }
+
+  appendSeriesPoint(gpuSeriesData, detail.utilization)
+  appendSeriesPoint(memorySeriesData, detail.memoryUsage)
+
+  if (detail.temperature !== null) {
+    appendSeriesPoint(temperatureSeriesData, detail.temperature)
+  } else {
+    temperatureSeriesData.value = []
+  }
+
+  if (detail.power) {
+    appendSeriesPoint(powerSeriesData, extractPowerDraw(detail.power))
+  } else {
+    powerSeriesData.value = []
+  }
+}
 
 const gpuChartSeries = computed(() => [{ name: 'GPU利用率', data: gpuSeriesData.value }])
 const memoryChartSeries = computed(() => [{ name: '显存使用率', data: memorySeriesData.value }])
@@ -402,39 +480,40 @@ const powerChartOptions = computed<ApexOptions>(() => ({
 
 let updateInterval: number | null = null
 
-onMounted(() => {
-  console.log('加载算力设备详情:', deviceId)
-  
-  // 模拟实时数据更新
+const loadDeviceDetails = async (silent = false) => {
+  if (!Number.isInteger(deviceId) || deviceId <= 0) {
+    error.value = '无效的设备 ID'
+    loading.value = false
+    return
+  }
+
+  if (!silent) {
+    loading.value = true
+    error.value = ''
+  }
+
+  try {
+    const data = await computeApi.getDeviceDetails(deviceId)
+    applyDeviceData(normalizeDevice(data))
+    error.value = ''
+  } catch (err: any) {
+    console.error('加载算力设备详情失败:', err)
+    if (!silent || !device.value) {
+      error.value = err?.error || err?.message || '加载设备详情失败'
+    }
+  } finally {
+    if (!silent) {
+      loading.value = false
+    }
+  }
+}
+
+onMounted(async () => {
+  await loadDeviceDetails(false)
+
   updateInterval = window.setInterval(() => {
-    // 更新GPU利用率（模拟波动）
-    const newUtilization = 60 + Math.random() * 15
-    device.value.utilization = Math.round(newUtilization)
-    
-    // 更新显存使用率
-    const newMemoryUsage = 50 + Math.random() * 15
-    device.value.memoryUsage = Math.round(newMemoryUsage)
-    
-    // 更新温度
-    if (device.value.temperature) {
-      device.value.temperature = 68 + Math.round(Math.random() * 8)
-    }
-    
-    // 更新图表数据（添加新数据点，移除旧数据点）
-    const newGpuData = gpuSeriesData.value.slice(-12)
-    newGpuData.push(device.value.utilization)
-    gpuSeriesData.value = newGpuData.slice(-13)
-    
-    const newMemoryData = memorySeriesData.value.slice(-12)
-    newMemoryData.push(device.value.memoryUsage)
-    memorySeriesData.value = newMemoryData.slice(-13)
-    
-    if (device.value.temperature) {
-      const newTempData = temperatureSeriesData.value.slice(-12)
-      newTempData.push(device.value.temperature)
-      temperatureSeriesData.value = newTempData.slice(-13)
-    }
-  }, 2000)
+    loadDeviceDetails(true)
+  }, POLL_INTERVAL_MS)
 })
 
 onUnmounted(() => {

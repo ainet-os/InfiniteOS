@@ -7,6 +7,7 @@ export interface ComputeDevice {
   compute: string
   memory: string
   memoryUsed?: string
+  memoryUsage?: number
   utilization: number
   temperature: number | null
   power: string | null

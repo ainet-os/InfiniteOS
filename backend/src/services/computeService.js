@@ -57,9 +57,11 @@ const getNvidiaGPUInfo = async () => {
         compute: calculateComputeValue(p.name),
         memory: `${p.memoryTotal} MB`,
         memoryUsed: `${p.memoryUsed} MB`,
+        memoryUsage: p.memoryTotal > 0 ? Math.round((p.memoryUsed / p.memoryTotal) * 100) : 0,
         utilization: p.utilization,
         temperature: p.temperature,
         power: `${p.powerDraw}W / ${p.powerLimit}W`,
+        powerLimit: `${p.powerLimit}W`,
         driver: p.driver,
         status: 'available',
       }
@@ -76,11 +78,51 @@ const getNvidiaGPUInfo = async () => {
 const getCudaVersion = async () => {
   try {
     const opts = { timeout: NVIDIA_SMI_TIMEOUT }
-    let result = await execCommand('nvidia-smi --query-gpu=cuda_version --format=csv,noheader', opts)
-    if (!result.success || !result.stdout) {
-      result = await execSudo('nvidia-smi --query-gpu=cuda_version --format=csv,noheader', opts)
+
+    const tryCommands = async (command) => {
+      let result = await execCommand(command, opts)
+      if (!result.success || !result.stdout) {
+        result = await execSudo(command, opts)
+      }
+      return result
     }
-    return (result.stdout && result.stdout.trim()) || null
+
+    // 新旧版本 nvidia-smi 都会在总览输出中包含 "CUDA Version: x.y"
+    let result = await tryCommands('nvidia-smi')
+    if (result.success && result.stdout) {
+      const match = result.stdout.match(/CUDA Version:\s*([0-9]+(?:\.[0-9]+)?)/i)
+      if (match?.[1]) {
+        return match[1]
+      }
+    }
+
+    // 某些环境未提供 nvcc，但会安装 CUDA 目录下的版本文件
+    result = await tryCommands('cat /usr/local/cuda/version.json')
+    if (result.success && result.stdout) {
+      try {
+        const parsed = JSON.parse(result.stdout)
+        const version = parsed?.cuda?.version
+        if (typeof version === 'string' && version.trim()) {
+          return version.trim()
+        }
+      } catch (error) {
+        console.warn('解析 /usr/local/cuda/version.json 失败:', error)
+      }
+    }
+
+    result = await tryCommands('cat /usr/local/cuda/version.txt')
+    if (result.success && result.stdout) {
+      const match = result.stdout.match(/CUDA(?:\s+Version)?\s*([0-9]+(?:\.[0-9]+)?(?:\.[0-9]+)?)/i)
+      if (match?.[1]) {
+        return match[1]
+      }
+      const fallback = result.stdout.trim()
+      if (fallback) {
+        return fallback
+      }
+    }
+
+    return null
   } catch (error) {
     return null
   }
@@ -107,6 +149,7 @@ const getAMDGPUInfo = async () => {
         vendor: 'AMD',
         compute: calculateComputeValue(parts[1]?.trim() || ''),
         memory: parts[3]?.trim() || '0 MB',
+        memoryUsage: 0,
         utilization: parseInt(parts[5]) || 0,
         temperature: parseInt(parts[4]) || null,
         status: 'available',
@@ -140,6 +183,7 @@ const getLspciGPUInfo = async () => {
         vendor: name.includes('NVIDIA') ? 'NVIDIA' : name.includes('AMD') ? 'AMD' : 'Unknown',
         compute: calculateComputeValue(name),
         memory: 'Unknown',
+        memoryUsage: 0,
         utilization: 0,
         status: 'unavailable',
         note: '需要安装相应的驱动和工具',
@@ -199,7 +243,11 @@ export const getComputeResources = async () => {
     if (nvidiaGPUs.length > 0) {
       const cudaVersion = await getCudaVersion()
       if (cudaVersion && resources.length > 0) {
-        resources[0].cudaVersion = cudaVersion
+        resources.forEach((resource) => {
+          if (resource.vendor === 'NVIDIA') {
+            resource.cudaVersion = cudaVersion
+          }
+        })
       }
     }
 
