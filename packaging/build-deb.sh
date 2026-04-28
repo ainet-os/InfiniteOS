@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 TEMPLATE_DIR="${SCRIPT_DIR}/deb"
 
-PKG_NAME="infinite-agent"
+PKG_NAME="iosm"
 BASE_VERSION="0.1.0"
 COMMIT_TIMEZONE="${COMMIT_TIMEZONE:-Asia/Shanghai}"
 COMMIT_TIMESTAMP="${COMMIT_TIMESTAMP:-$(TZ="${COMMIT_TIMEZONE}" git -C "${REPO_ROOT}" log -1 --format='%cd' --date=format-local:'%Y%m%d%H%M%S')}"
@@ -74,7 +74,6 @@ INSTALLED_SIZE="$(
 
 echo "==> Rendering DEBIAN metadata"
 sed \
-  -e "s/__PKG_NAME__/${PKG_NAME}/g" \
   -e "s/__VERSION__/${VERSION}/g" \
   -e "s/__ARCH__/${ARCH}/g" \
   -e "s/__INSTALLED_SIZE__/${INSTALLED_SIZE}/g" \

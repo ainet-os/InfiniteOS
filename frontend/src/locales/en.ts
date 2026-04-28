@@ -5,7 +5,6 @@ export default {
     system: 'System',
     infiniteEdgeOS: 'InfiniteOS',
     infiniteEdgeOSEn: 'InfiniteOS',
-    backToDashboard: 'Back to dashboard',
     language: 'Language',
     chinese: '中文',
     english: 'English',

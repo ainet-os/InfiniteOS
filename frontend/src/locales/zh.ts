@@ -5,7 +5,6 @@ export default {
     system: '系统',
     infiniteEdgeOS: 'InfiniteOS',
     infiniteEdgeOSEn: 'InfiniteOS',
-    backToDashboard: '返回仪表板',
     language: '语言',
     chinese: '中文',
     english: 'English',
