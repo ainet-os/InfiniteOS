@@ -50,6 +50,10 @@ export interface NetworkInterfaceDetails {
   ip6: string
   gateway: string
   dns: string[]
+  routes: Array<{
+    to: string
+    via: string
+  }>
   mac: string
   interfaces: string[]
   link: string
@@ -62,6 +66,10 @@ export interface UpdateNetworkRequest {
   ip4?: string
   gateway?: string
   dns?: string[]
+  routes?: Array<{
+    to: string
+    via: string
+  }>
 }
 
 export interface ApplyNetworkOperation {
@@ -73,6 +81,10 @@ export interface ApplyNetworkOperation {
     ip4?: string
     gateway?: string
     dns?: string[]
+    routes?: Array<{
+      to: string
+      via: string
+    }>
     interfaces?: string[]
     link?: string
     vlanId?: number

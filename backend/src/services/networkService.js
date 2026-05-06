@@ -131,14 +131,75 @@ function isValidIPv4Cidr(value) {
   return prefixNumber >= 0 && prefixNumber <= 32
 }
 
+function isDefaultRouteDestination(value) {
+  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : ''
+  return normalized === 'default' || normalized === '0.0.0.0/0'
+}
+
+function normalizeRouteList(routes) {
+  if (!Array.isArray(routes)) return []
+
+  const unique = new Set()
+  const normalizedRoutes = []
+
+  for (const route of routes) {
+    if (!isPlainObject(route)) {
+      throw new Error('静态路由格式不正确')
+    }
+
+    const rawTo = typeof route.to === 'string' ? route.to.trim() : ''
+    const via = typeof route.via === 'string' ? route.via.trim() : ''
+
+    if (!rawTo && !via) continue
+    if (!rawTo || !via) {
+      throw new Error('静态路由需要同时填写目标网段和下一跳网关')
+    }
+
+    if (isDefaultRouteDestination(rawTo)) {
+      throw new Error('默认路由请使用“网关”字段配置')
+    }
+
+    if (!isValidIPv4Cidr(rawTo)) {
+      throw new Error('静态路由目标网段格式不正确，应为 IPv4/CIDR，例如 10.10.0.0/16')
+    }
+
+    if (isIP(via) !== 4) {
+      throw new Error('静态路由下一跳地址格式不正确')
+    }
+
+    const normalizedRoute = {
+      to: rawTo,
+      via,
+    }
+    const routeKey = `${normalizedRoute.to}|${normalizedRoute.via}`
+
+    if (unique.has(routeKey)) continue
+    unique.add(routeKey)
+    normalizedRoutes.push(normalizedRoute)
+  }
+
+  return normalizedRoutes
+}
+
 function normalizeAddressConfig(config = {}) {
   const method = config.method === 'dhcp' ? 'auto' : config.method || 'auto'
   const ip4 = typeof config.ip4 === 'string' ? config.ip4.trim() : ''
   const gateway = typeof config.gateway === 'string' ? config.gateway.trim() : ''
   const dns = normalizeDnsList(config.dns)
+  const routes = normalizeRouteList(config.routes)
 
   if (!['auto', 'static'].includes(method)) {
     throw new Error('仅支持 DHCP 或静态 IPv4 配置')
+  }
+
+  if (method === 'auto') {
+    return {
+      method,
+      ip4: '',
+      gateway: '',
+      dns: [],
+      routes: [],
+    }
   }
 
   if (method === 'static') {
@@ -158,6 +219,7 @@ function normalizeAddressConfig(config = {}) {
     ip4,
     gateway,
     dns,
+    routes,
   }
 }
 
@@ -278,12 +340,33 @@ function parseDefaultGateway(netConfig) {
 
   const route = netConfig.routes.find(item => (
     isPlainObject(item)
-    && ['default', '0.0.0.0/0'].includes(String(item.to || '').trim())
+    && isDefaultRouteDestination(String(item.to || '').trim())
     && typeof item.via === 'string'
     && item.via.trim()
   ))
 
   return route?.via?.trim() || ''
+}
+
+function parseStaticRoutes(netConfig) {
+  if (!Array.isArray(netConfig?.routes)) return []
+
+  const routes = []
+
+  for (const route of netConfig.routes) {
+    if (!isPlainObject(route)) continue
+
+    const to = typeof route.to === 'string' ? route.to.trim() : ''
+    const via = typeof route.via === 'string' ? route.via.trim() : ''
+
+    if (!to || !via) continue
+    if (isDefaultRouteDestination(to)) continue
+    if (!isValidIPv4Cidr(to) || isIP(via) !== 4) continue
+
+    routes.push({ to, via })
+  }
+
+  return routes
 }
 
 function parseNameservers(netConfig) {
@@ -303,7 +386,16 @@ function parseMethod(netConfig) {
 
 function buildAddressingConfig(config) {
   if (config.method === 'auto') {
-    return { dhcp4: true }
+    const nextConfig = { dhcp4: true }
+
+    if (Array.isArray(config.routes) && config.routes.length > 0) {
+      nextConfig.routes = config.routes.map(route => ({
+        to: route.to,
+        via: route.via,
+      }))
+    }
+
+    return nextConfig
   }
 
   const nextConfig = {
@@ -311,8 +403,20 @@ function buildAddressingConfig(config) {
     addresses: [config.ip4],
   }
 
+  const routes = []
   if (config.gateway) {
-    nextConfig.routes = [{ to: 'default', via: config.gateway }]
+    routes.push({ to: 'default', via: config.gateway })
+  }
+
+  if (Array.isArray(config.routes) && config.routes.length > 0) {
+    routes.push(...config.routes.map(route => ({
+      to: route.to,
+      via: route.via,
+    })))
+  }
+
+  if (routes.length > 0) {
+    nextConfig.routes = routes
   }
 
   if (config.dns.length > 0) {
@@ -1245,6 +1349,7 @@ export const getInterfaceDetails = async (interfaceName) => {
       ip6: isBridgeOrBondMember ? '' : runtimeInterface?.ip6 || '',
       gateway: isBridgeOrBondMember ? '' : configuredGateway || runtimeGateway,
       dns: isBridgeOrBondMember ? [] : configuredDns,
+      routes: isBridgeOrBondMember ? [] : parseStaticRoutes(netConfig),
       mac: runtimeInterface?.mac || runtimeLink?.mac || '',
       ...getLogicalExtras(interfaceName, deviceType, netConfig, runtimeLink, runtimeMasterMembers),
     }

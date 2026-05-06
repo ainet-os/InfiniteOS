@@ -311,6 +311,50 @@
               </div>
             </template>
 
+            <div>
+              <div class="mb-2 flex items-center justify-between gap-3">
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">静态路由</label>
+                <button
+                  type="button"
+                  class="rounded bg-brand-500/10 px-3 py-1 text-xs text-brand-500 transition-colors hover:bg-brand-500/20"
+                  @click="addRouteRow(createForm)"
+                >
+                  添加路由
+                </button>
+              </div>
+              <div v-if="createForm.routes.length > 0" class="space-y-3">
+                <div
+                  v-for="(route, index) in createForm.routes"
+                  :key="`create-route-${index}`"
+                  class="grid gap-3 rounded-lg border border-gray-200 p-3 dark:border-gray-700 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]"
+                >
+                  <input
+                    v-model="route.to"
+                    type="text"
+                    class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-800 focus:border-transparent focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white/90"
+                    placeholder="目标网段，例如: 10.10.0.0/16"
+                  />
+                  <input
+                    v-model="route.via"
+                    type="text"
+                    class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-800 focus:border-transparent focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white/90"
+                    placeholder="下一跳，例如: 192.168.1.254"
+                  />
+                  <button
+                    type="button"
+                    class="rounded bg-danger-500/10 px-3 py-2 text-xs text-danger-500 transition-colors hover:bg-danger-500/20"
+                    @click="removeRouteRow(createForm, index)"
+                  >
+                    删除
+                  </button>
+                </div>
+              </div>
+              <p v-else class="text-sm text-gray-500 dark:text-gray-400">未配置额外静态路由</p>
+              <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                默认路由请使用“网关”字段；这里用于配置额外网段路由，DHCP 和静态 IP 都可使用。
+              </p>
+            </div>
+
             <div class="flex justify-end gap-3 pt-4">
               <button
                 type="button"
@@ -467,6 +511,50 @@
               </div>
             </template>
 
+            <div>
+              <div class="mb-2 flex items-center justify-between gap-3">
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">静态路由</label>
+                <button
+                  type="button"
+                  class="rounded bg-brand-500/10 px-3 py-1 text-xs text-brand-500 transition-colors hover:bg-brand-500/20"
+                  @click="addRouteRow(editForm)"
+                >
+                  添加路由
+                </button>
+              </div>
+              <div v-if="editForm.routes.length > 0" class="space-y-3">
+                <div
+                  v-for="(route, index) in editForm.routes"
+                  :key="`edit-route-${index}`"
+                  class="grid gap-3 rounded-lg border border-gray-200 p-3 dark:border-gray-700 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]"
+                >
+                  <input
+                    v-model="route.to"
+                    type="text"
+                    class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-800 focus:border-transparent focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white/90"
+                    placeholder="目标网段，例如: 10.10.0.0/16"
+                  />
+                  <input
+                    v-model="route.via"
+                    type="text"
+                    class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-800 focus:border-transparent focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white/90"
+                    placeholder="下一跳，例如: 192.168.1.254"
+                  />
+                  <button
+                    type="button"
+                    class="rounded bg-danger-500/10 px-3 py-2 text-xs text-danger-500 transition-colors hover:bg-danger-500/20"
+                    @click="removeRouteRow(editForm, index)"
+                  >
+                    删除
+                  </button>
+                </div>
+              </div>
+              <p v-else class="text-sm text-gray-500 dark:text-gray-400">未配置额外静态路由</p>
+              <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                默认路由请使用“网关”字段；这里用于配置额外网段路由，DHCP 和静态 IP 都可使用。
+              </p>
+            </div>
+
             <div class="flex justify-end gap-3 pt-4">
               <button
                 type="button"
@@ -517,6 +605,10 @@ type NetworkForm = {
   ip4: string
   gateway: string
   dnsStr: string
+  routes: Array<{
+    to: string
+    via: string
+  }>
   interfaces: string[]
   link: string
   vlanId: string
@@ -544,6 +636,7 @@ function createEmptyForm(type: NetworkForm['type']): NetworkForm {
     ip4: '',
     gateway: '',
     dnsStr: '',
+    routes: [],
     interfaces: [],
     link: '',
     vlanId: '',
@@ -605,9 +698,23 @@ function parseDnsString(value: string) {
     .filter(Boolean)
 }
 
+function normalizeFormRoutes(routes: NetworkForm['routes']) {
+  return routes
+    .map(route => ({
+      to: route.to.trim(),
+      via: route.via.trim(),
+    }))
+    .filter(route => route.to || route.via)
+}
+
 function buildOperationFromForm(form: NetworkForm): ApplyNetworkOperation {
   const config: ApplyNetworkOperation['config'] = {
     method: form.method,
+  }
+
+  const routes = normalizeFormRoutes(form.routes)
+  if (routes.length > 0) {
+    config.routes = routes
   }
 
   if (form.method === 'static') {
@@ -839,6 +946,14 @@ function toggleFormMember(form: NetworkForm, memberName: string) {
   form.interfaces = [...form.interfaces, memberName]
 }
 
+function addRouteRow(form: NetworkForm) {
+  form.routes = [...form.routes, { to: '', via: '' }]
+}
+
+function removeRouteRow(form: NetworkForm, index: number) {
+  form.routes = form.routes.filter((_, routeIndex) => routeIndex !== index)
+}
+
 async function loadInterfaces() {
   loading.value = true
   try {
@@ -894,6 +1009,7 @@ async function openEditDialog(iface: DisplayInterface) {
       ip4: isBridgeOrBondMember ? '' : details.ip4 || '',
       gateway: isBridgeOrBondMember ? '' : details.gateway || '',
       dnsStr: isBridgeOrBondMember ? '' : details.dns.join(', '),
+      routes: isBridgeOrBondMember ? [] : (details.routes || []).map(route => ({ ...route })),
       interfaces: details.interfaces || [],
       link: details.link || '',
       vlanId: details.vlanId ? String(details.vlanId) : '',
@@ -914,6 +1030,7 @@ function formFromOperation(operation: ApplyNetworkOperation): NetworkForm {
     ip4: operation.config?.ip4 || '',
     gateway: operation.config?.gateway || '',
     dnsStr: (operation.config?.dns || []).join(', '),
+    routes: (operation.config?.routes || []).map(route => ({ ...route })),
     interfaces: [...(operation.config?.interfaces || [])],
     link: operation.config?.link || '',
     vlanId: operation.config?.vlanId ? String(operation.config.vlanId) : '',
