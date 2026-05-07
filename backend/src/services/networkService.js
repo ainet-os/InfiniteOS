@@ -198,7 +198,7 @@ function normalizeAddressConfig(config = {}) {
       ip4: '',
       gateway: '',
       dns: [],
-      routes: [],
+      routes,
     }
   }
 
