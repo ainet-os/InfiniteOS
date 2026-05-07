@@ -276,6 +276,17 @@
                   <option value="static">静态 IP</option>
                 </select>
               </div>
+              <label
+                v-if="createForm.method === 'auto'"
+                class="flex items-center gap-2 self-end pb-2 text-sm text-gray-700 dark:text-gray-300"
+              >
+                <input
+                  v-model="createForm.useDhcpRoutes"
+                  type="checkbox"
+                  class="rounded border-gray-300 text-brand-500 focus:ring-brand-500"
+                />
+                <span>使用 DHCP 自动路由</span>
+              </label>
             </div>
 
             <template v-if="createForm.method === 'static'">
@@ -466,16 +477,29 @@
               </div>
             </div>
 
-            <div>
-              <label class="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">配置方式</label>
-              <select
-                v-model="editForm.method"
-                class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-800 focus:border-transparent focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white/90"
-                @change="onMethodChange(editForm)"
+            <div class="grid gap-4 md:grid-cols-2">
+              <div>
+                <label class="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">配置方式</label>
+                <select
+                  v-model="editForm.method"
+                  class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-800 focus:border-transparent focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white/90"
+                  @change="onMethodChange(editForm)"
+                >
+                  <option value="auto">自动 (DHCP)</option>
+                  <option value="static">静态 IP</option>
+                </select>
+              </div>
+              <label
+                v-if="editForm.method === 'auto'"
+                class="flex items-center gap-2 self-end pb-2 text-sm text-gray-700 dark:text-gray-300"
               >
-                <option value="auto">自动 (DHCP)</option>
-                <option value="static">静态 IP</option>
-              </select>
+                <input
+                  v-model="editForm.useDhcpRoutes"
+                  type="checkbox"
+                  class="rounded border-gray-300 text-brand-500 focus:ring-brand-500"
+                />
+                <span>使用 DHCP 自动路由</span>
+              </label>
             </div>
 
             <template v-if="editForm.method === 'static'">
@@ -605,6 +629,7 @@ type NetworkForm = {
   ip4: string
   gateway: string
   dnsStr: string
+  useDhcpRoutes: boolean
   routes: Array<{
     to: string
     via: string
@@ -636,6 +661,7 @@ function createEmptyForm(type: NetworkForm['type']): NetworkForm {
     ip4: '',
     gateway: '',
     dnsStr: '',
+    useDhcpRoutes: true,
     routes: [],
     interfaces: [],
     link: '',
@@ -715,6 +741,10 @@ function buildOperationFromForm(form: NetworkForm): ApplyNetworkOperation {
   const routes = normalizeFormRoutes(form.routes)
   if (routes.length > 0) {
     config.routes = routes
+  }
+
+  if (form.method === 'auto') {
+    config.useDhcpRoutes = form.useDhcpRoutes
   }
 
   if (form.method === 'static') {
@@ -927,7 +957,10 @@ function onMethodChange(form: NetworkForm) {
     form.ip4 = ''
     form.gateway = ''
     form.dnsStr = ''
+    return
   }
+
+  form.useDhcpRoutes = true
 }
 
 function onCreateTypeChange() {
@@ -1009,6 +1042,7 @@ async function openEditDialog(iface: DisplayInterface) {
       ip4: isBridgeOrBondMember ? '' : details.ip4 || '',
       gateway: isBridgeOrBondMember ? '' : details.gateway || '',
       dnsStr: isBridgeOrBondMember ? '' : details.dns.join(', '),
+      useDhcpRoutes: isBridgeOrBondMember ? true : details.useDhcpRoutes !== false,
       routes: isBridgeOrBondMember ? [] : (details.routes || []).map(route => ({ ...route })),
       interfaces: details.interfaces || [],
       link: details.link || '',
@@ -1030,6 +1064,7 @@ function formFromOperation(operation: ApplyNetworkOperation): NetworkForm {
     ip4: operation.config?.ip4 || '',
     gateway: operation.config?.gateway || '',
     dnsStr: (operation.config?.dns || []).join(', '),
+    useDhcpRoutes: operation.config?.useDhcpRoutes !== false,
     routes: (operation.config?.routes || []).map(route => ({ ...route })),
     interfaces: [...(operation.config?.interfaces || [])],
     link: operation.config?.link || '',

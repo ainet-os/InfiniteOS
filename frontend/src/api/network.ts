@@ -50,6 +50,7 @@ export interface NetworkInterfaceDetails {
   ip6: string
   gateway: string
   dns: string[]
+  useDhcpRoutes: boolean
   routes: Array<{
     to: string
     via: string
@@ -66,6 +67,7 @@ export interface UpdateNetworkRequest {
   ip4?: string
   gateway?: string
   dns?: string[]
+  useDhcpRoutes?: boolean
   routes?: Array<{
     to: string
     via: string
@@ -81,6 +83,7 @@ export interface ApplyNetworkOperation {
     ip4?: string
     gateway?: string
     dns?: string[]
+    useDhcpRoutes?: boolean
     routes?: Array<{
       to: string
       via: string

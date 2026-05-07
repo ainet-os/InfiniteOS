@@ -59,6 +59,26 @@ function deepMerge(target, source) {
   return result
 }
 
+function mergeNetplanConfig(baseConfig, appConfig) {
+  const merged = deepMerge(baseConfig, appConfig)
+
+  if (!isPlainObject(baseConfig?.network) || !isPlainObject(appConfig?.network)) {
+    return ensureNetworkSections(merged)
+  }
+
+  ensureNetworkSections(merged)
+  for (const section of Object.values(CONFIG_SECTIONS)) {
+    if (isPlainObject(appConfig.network[section])) {
+      merged.network[section] = {
+        ...(isPlainObject(baseConfig.network[section]) ? baseConfig.network[section] : {}),
+        ...appConfig.network[section],
+      }
+    }
+  }
+
+  return merged
+}
+
 function cloneData(value) {
   return JSON.parse(JSON.stringify(value))
 }
@@ -187,6 +207,7 @@ function normalizeAddressConfig(config = {}) {
   const gateway = typeof config.gateway === 'string' ? config.gateway.trim() : ''
   const dns = normalizeDnsList(config.dns)
   const routes = normalizeRouteList(config.routes)
+  const useDhcpRoutes = config.useDhcpRoutes !== false
 
   if (!['auto', 'static'].includes(method)) {
     throw new Error('仅支持 DHCP 或静态 IPv4 配置')
@@ -199,6 +220,7 @@ function normalizeAddressConfig(config = {}) {
       gateway: '',
       dns: [],
       routes,
+      useDhcpRoutes,
     }
   }
 
@@ -369,6 +391,13 @@ function parseStaticRoutes(netConfig) {
   return routes
 }
 
+function parseUseDhcpRoutes(netConfig) {
+  if (!isPlainObject(netConfig) || netConfig.dhcp4 !== true) return true
+
+  const overrides = netConfig['dhcp4-overrides']
+  return !(isPlainObject(overrides) && overrides['use-routes'] === false)
+}
+
 function parseNameservers(netConfig) {
   const addresses = netConfig?.nameservers?.addresses
   if (!Array.isArray(addresses)) return []
@@ -387,6 +416,10 @@ function parseMethod(netConfig) {
 function buildAddressingConfig(config) {
   if (config.method === 'auto') {
     const nextConfig = { dhcp4: true }
+
+    if (config.useDhcpRoutes === false) {
+      nextConfig['dhcp4-overrides'] = { 'use-routes': false }
+    }
 
     if (Array.isArray(config.routes) && config.routes.length > 0) {
       nextConfig.routes = config.routes.map(route => ({
@@ -1350,6 +1383,7 @@ export const getInterfaceDetails = async (interfaceName) => {
       gateway: isBridgeOrBondMember ? '' : configuredGateway || runtimeGateway,
       dns: isBridgeOrBondMember ? [] : configuredDns,
       routes: isBridgeOrBondMember ? [] : parseStaticRoutes(netConfig),
+      useDhcpRoutes: isBridgeOrBondMember ? true : parseUseDhcpRoutes(netConfig),
       mac: runtimeInterface?.mac || runtimeLink?.mac || '',
       ...getLogicalExtras(interfaceName, deviceType, netConfig, runtimeLink, runtimeMasterMembers),
     }
@@ -1445,7 +1479,7 @@ export const applyNetworkChanges = async ({ operations = [] } = {}) => {
       nextAppConfig.network.ethernets[member] = buildMemberEthernetConfig(existingConfig)
     }
 
-    const finalMergedConfig = deepMerge(baseMergedConfig, nextAppConfig)
+    const finalMergedConfig = mergeNetplanConfig(baseMergedConfig, nextAppConfig)
     validateFinalTopology(finalMergedConfig, runtimeMap, runtimeLinkMap)
 
     const hasBaseNetplanTakeover = takeoverNetplanFiles.length > 0
