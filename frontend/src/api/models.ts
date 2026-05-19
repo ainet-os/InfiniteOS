@@ -28,6 +28,8 @@ export interface ModelListItem {
   size: string
 }
 
+const MODEL_SYNC_TIMEOUT = 2 * 60 * 60 * 1000
+
 
 export const modelsApi = {
   loginCloud: (data: CloudLoginRequest): Promise<CloudCredentials> => {
@@ -40,7 +42,9 @@ export const modelsApi = {
     return api.post('/models/cloud/list', data)
   },
   syncCloudModelToLocal: (name: string, data: CloudModelRequest): Promise<{ message: string; name: string }> => {
-    return api.post(`/models/cloud/sync/${encodeURIComponent(name)}`, data)
+    return api.post(`/models/cloud/sync/${encodeURIComponent(name)}`, data, {
+      timeout: MODEL_SYNC_TIMEOUT,
+    })
   },
   deleteLocalModel: (name: string, type: ModelTabType = 'public'): Promise<{ message: string }> => {
     return api.delete(`/models/local/${encodeURIComponent(name)}`, { params: { type } })
