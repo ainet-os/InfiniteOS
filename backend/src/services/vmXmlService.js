@@ -174,6 +174,7 @@ export const parseVmDomainXml = (xml) => {
 
 export const buildVmDomainXml = (domain) => {
   domain.devices = domain.devices || {}
+  domain.on_reboot = 'restart'
 
   const channels = toArray(domain.devices.channel)
   const hasGuestAgentChannel = channels.some(

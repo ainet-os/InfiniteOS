@@ -764,6 +764,8 @@ const buildVmInstallArgs = (request, diskPaths, options = {}) => {
     request.graphics === 'none' ? 'none' : 'vnc,listen=127.0.0.1',
     '--channel',
     'unix,target_type=virtio,name=org.qemu.guest_agent.0',
+    '--events',
+    'on_reboot=restart',
     '--serial',
     'pty',
     '--console',
